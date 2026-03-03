@@ -1,0 +1,7 @@
+.{
+    .name = .dot,
+    .fingerprint = 0x59278a35c075593,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.15.2",
+    .paths = .{"."},
+}

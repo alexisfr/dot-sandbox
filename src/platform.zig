@@ -1,0 +1,213 @@
+const std = @import("std");
+const builtin = @import("builtin");
+
+pub const Os = enum {
+    linux,
+    macos,
+
+    pub fn current() Os {
+        return switch (builtin.os.tag) {
+            .macos => .macos,
+            else => .linux,
+        };
+    }
+
+    /// Name used in download URLs (Go convention)
+    pub fn name(self: Os) []const u8 {
+        return switch (self) {
+            .linux => "linux",
+            .macos => "darwin",
+        };
+    }
+};
+
+pub const Arch = enum {
+    x86_64,
+    aarch64,
+    arm,
+    i386,
+
+    pub fn current() Arch {
+        return switch (builtin.cpu.arch) {
+            .aarch64 => .aarch64,
+            .arm => .arm,
+            .x86 => .i386,
+            else => .x86_64,
+        };
+    }
+
+    /// Name used in most Go-based tool URLs (amd64/arm64)
+    pub fn goName(self: Arch) []const u8 {
+        return switch (self) {
+            .x86_64 => "amd64",
+            .aarch64 => "arm64",
+            .arm => "arm",
+            .i386 => "386",
+        };
+    }
+
+    /// Debian/Ubuntu package arch name
+    pub fn debName(self: Arch) []const u8 {
+        return switch (self) {
+            .x86_64 => "amd64",
+            .aarch64 => "arm64",
+            .arm => "armhf",
+            .i386 => "i386",
+        };
+    }
+
+    /// Raw uname -m name
+    pub fn unameName(self: Arch) []const u8 {
+        return switch (self) {
+            .x86_64 => "x86_64",
+            .aarch64 => "aarch64",
+            .arm => "armv7l",
+            .i386 => "i686",
+        };
+    }
+};
+
+pub const Shell = enum {
+    bash,
+    zsh,
+    fish,
+    unknown,
+
+    pub fn detect() Shell {
+        const shell_env = std.posix.getenv("SHELL") orelse return .unknown;
+        const shell_name = std.fs.path.basename(shell_env);
+        if (std.mem.eql(u8, shell_name, "bash")) return .bash;
+        if (std.mem.eql(u8, shell_name, "zsh")) return .zsh;
+        if (std.mem.eql(u8, shell_name, "fish")) return .fish;
+        return .unknown;
+    }
+
+    pub fn name(self: Shell) []const u8 {
+        return switch (self) {
+            .bash => "bash",
+            .zsh => "zsh",
+            .fish => "fish",
+            .unknown => "unknown",
+        };
+    }
+
+    /// Path to main shell RC file
+    pub fn rcFile(self: Shell) ?[]const u8 {
+        const home = std.posix.getenv("HOME") orelse return null;
+        _ = home;
+        return switch (self) {
+            .bash => "~/.bashrc",
+            .zsh => "~/.zshrc",
+            .fish => "~/.config/fish/config.fish",
+            .unknown => null,
+        };
+    }
+
+    /// Name of centralized integration file
+    pub fn integrationFileName(self: Shell) []const u8 {
+        return switch (self) {
+            .bash => "shell-integration.bash",
+            .zsh => "shell-integration.zsh",
+            .fish => "shell-integration.fish",
+            .unknown => "shell-integration.sh",
+        };
+    }
+
+    /// Shell-specific syntax to add a directory to PATH
+    pub fn pathAddSyntax(self: Shell, dir: []const u8, allocator: std.mem.Allocator) ![]u8 {
+        return switch (self) {
+            .fish => std.fmt.allocPrint(allocator, "set -gx PATH {s} $PATH", .{dir}),
+            else => std.fmt.allocPrint(allocator, "export PATH=\"{s}:$PATH\"", .{dir}),
+        };
+    }
+};
+
+pub const PackageManager = enum {
+    pacman,
+    apt,
+    dnf,
+    yum,
+    zypper,
+    apk,
+    brew,
+    flatpak,
+    snap,
+    unknown,
+
+    /// Detect the primary native package manager in priority order
+    pub fn detect() PackageManager {
+        const native = [_]PackageManager{ .pacman, .apt, .dnf, .yum, .zypper, .apk };
+        for (native) |pm| {
+            if (pm.isAvailable()) return pm;
+        }
+        if (PackageManager.brew.isAvailable()) return .brew;
+        if (PackageManager.flatpak.isAvailable()) return .flatpak;
+        if (PackageManager.snap.isAvailable()) return .snap;
+        return .unknown;
+    }
+
+    /// Check if a package manager binary exists in PATH
+    pub fn isAvailable(self: PackageManager) bool {
+        const cmd = self.command() orelse return false;
+        // Use std.process to check
+        const result = std.process.Child.run(.{
+            .allocator = std.heap.page_allocator,
+            .argv = &.{ "sh", "-c", std.fmt.allocPrint(
+                std.heap.page_allocator,
+                "command -v {s}",
+                .{cmd},
+            ) catch return false },
+        }) catch return false;
+        std.heap.page_allocator.free(result.stdout);
+        std.heap.page_allocator.free(result.stderr);
+        return result.term.Exited == 0;
+    }
+
+    pub fn command(self: PackageManager) ?[]const u8 {
+        return switch (self) {
+            .pacman => "pacman",
+            .apt => "apt",
+            .dnf => "dnf",
+            .yum => "yum",
+            .zypper => "zypper",
+            .apk => "apk",
+            .brew => "brew",
+            .flatpak => "flatpak",
+            .snap => "snap",
+            .unknown => null,
+        };
+    }
+
+    /// Install command prefix (without package name)
+    pub fn installArgs(self: PackageManager) []const []const u8 {
+        return switch (self) {
+            .pacman => &.{ "pacman", "-S", "--noconfirm" },
+            .apt => &.{ "apt-get", "install", "-y" },
+            .dnf => &.{ "dnf", "install", "-y" },
+            .yum => &.{ "yum", "install", "-y" },
+            .zypper => &.{ "zypper", "install", "-y" },
+            .apk => &.{ "apk", "add" },
+            .brew => &.{ "brew", "install" },
+            .flatpak => &.{ "flatpak", "install", "-y" },
+            .snap => &.{ "snap", "install" },
+            .unknown => &.{},
+        };
+    }
+};
+
+test "Os.current does not panic" {
+    _ = Os.current();
+}
+
+test "Arch.current does not panic" {
+    _ = Arch.current();
+}
+
+test "Shell.detect does not panic" {
+    _ = Shell.detect();
+}
+
+test "PackageManager command names" {
+    try std.testing.expectEqualStrings("pacman", PackageManager.pacman.command().?);
+    try std.testing.expectEqualStrings("apt", PackageManager.apt.command().?);
+}
