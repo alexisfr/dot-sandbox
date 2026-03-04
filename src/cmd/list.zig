@@ -27,13 +27,13 @@ pub fn run(
         }
     }
 
+    // Column visual widths: Tool=16, Desc=33, Status=14 ("not installed"+1 or "✓ installed"+3)
     std.debug.print("\n{s}{s}Available Tools{s}\n\n", .{ CYAN, BOLD, RESET });
-    std.debug.print("{s}{s:<16} {s:<30} {s:<12} {s}{s}\n", .{
+    std.debug.print("{s}{s:<16} {s:<33} {s:<14} {s}{s}\n", .{
         BOLD, "Tool", "Description", "Status", "Groups", RESET,
     });
     std.debug.print("{s}", .{DIM});
-    var j: usize = 0;
-    while (j < 75) : (j += 1) std.debug.print("─", .{});
+    for (0..73) |_| std.debug.print("─", .{});
     std.debug.print("{s}\n", .{RESET});
 
     for (registry.all_tools) |t| {
@@ -46,12 +46,6 @@ pub fn run(
             if (!in_group) continue;
         }
 
-        // Status
-        const status: []const u8 = if (state.isInstalled(t.id))
-            GREEN ++ "✓ installed" ++ RESET
-        else
-            DIM ++ "not installed" ++ RESET;
-
         // Groups as string
         var groups_buf: [64]u8 = undefined;
         var groups_str = std.io.fixedBufferStream(&groups_buf);
@@ -62,14 +56,21 @@ pub fn run(
         }
         const groups = groups_str.getWritten();
 
-        const desc_trunc = if (t.description.len > 29) t.description[0..29] else t.description;
+        const desc = t.description[0..@min(t.description.len, 33)];
 
-        std.debug.print("{s:<16} {s:<30} {s:<24} {s}\n", .{
-            t.id,
-            desc_trunc,
-            status,
-            groups,
-        });
+        // Print id and description with format padding (no ANSI = byte == visual)
+        std.debug.print("{s:<16} {s:<33} ", .{ t.id, desc });
+
+        // Status: print color+text+reset then hardcoded spaces to reach visual col width 14.
+        // "✓ installed"  = 11 visual chars → pad 3 spaces
+        // "not installed" = 13 visual chars → pad 1 space
+        if (state.isInstalled(t.id)) {
+            std.debug.print(GREEN ++ "✓ installed" ++ RESET ++ "   ", .{});
+        } else {
+            std.debug.print(DIM ++ "not installed" ++ RESET ++ " ", .{});
+        }
+
+        std.debug.print("{s}\n", .{groups});
     }
 
     std.debug.print("\n{d} tools total", .{registry.all_tools.len});

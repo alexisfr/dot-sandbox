@@ -6,6 +6,7 @@ pub const def: tool.Tool = .{
     .description = "Lightweight and flexible command-line JSON processor",
     .groups = &.{.utils},
     .homepage = "https://jqlang.github.io/jq/",
+    .brew_formula = "jq",
     .version_source = .{ .github_release = .{ .repo = "jqlang/jq" } },
     .strategy = .{ .direct_binary = .{
         .url_template = "https://github.com/jqlang/jq/releases/download/{version}/jq-{os}-{arch}",

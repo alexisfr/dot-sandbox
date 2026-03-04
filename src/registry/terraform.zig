@@ -6,6 +6,7 @@ pub const def: tool.Tool = .{
     .description = "Infrastructure as Code tool by HashiCorp",
     .groups = &.{.iac},
     .homepage = "https://www.terraform.io",
+    .brew_formula = "hashicorp/tap/terraform",
     .version_source = .{ .hashicorp = .{ .product = "terraform" } },
     .strategy = .{ .hashicorp_release = .{ .product = "terraform" } },
     .shell_completions = .{

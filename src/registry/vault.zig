@@ -6,6 +6,7 @@ pub const def: tool.Tool = .{
     .description = "Secrets management tool by HashiCorp",
     .groups = &.{.iac},
     .homepage = "https://www.vaultproject.io",
+    .brew_formula = "hashicorp/tap/vault",
     .version_source = .{ .hashicorp = .{ .product = "vault" } },
     .strategy = .{ .hashicorp_release = .{ .product = "vault" } },
     .shell_completions = .{

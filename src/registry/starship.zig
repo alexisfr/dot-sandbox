@@ -6,6 +6,7 @@ pub const def: tool.Tool = .{
     .description = "The minimal, blazing-fast, and infinitely customizable prompt for any shell",
     .groups = &.{.terminal},
     .homepage = "https://starship.rs",
+    .brew_formula = "starship",
     .version_source = .{ .github_release = .{ .repo = "starship/starship" } },
     .strategy = .{ .github_release = .{
         .url_template = "https://github.com/starship/starship/releases/download/v{version}/starship-{arch}-unknown-{os}-musl.tar.gz",

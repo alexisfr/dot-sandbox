@@ -6,6 +6,7 @@ pub const def: tool.Tool = .{
     .description = "Kubernetes credential plugin for Azure/AAD authentication",
     .groups = &.{.k8s},
     .homepage = "https://github.com/Azure/kubelogin",
+    .brew_formula = "int128/kubelogin/kubelogin",
     .version_source = .{ .github_release = .{ .repo = "Azure/kubelogin" } },
     .strategy = .{ .github_release = .{
         .url_template = "https://github.com/Azure/kubelogin/releases/download/v{version}/kubelogin-{os}-{arch}.zip",

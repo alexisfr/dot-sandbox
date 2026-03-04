@@ -6,6 +6,7 @@ pub const def: tool.Tool = .{
     .description = "Terminal UI to interact with Kubernetes clusters",
     .groups = &.{.k8s},
     .homepage = "https://k9scli.io",
+    .brew_formula = "k9s",
     .version_source = .{ .github_release = .{ .repo = "derailed/k9s" } },
     .strategy = .{ .github_release = .{
         .url_template = "https://github.com/derailed/k9s/releases/download/v{version}/k9s_{os}_{arch}.tar.gz",

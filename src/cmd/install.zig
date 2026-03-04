@@ -155,51 +155,67 @@ fn installTool(
 
     output.printStep("Pre-checks", "✓", "Ready");
 
-    // Set up context
-    const home = std.posix.getenv("HOME") orelse "/tmp";
-    const bin_dir = try std.fs.path.join(allocator, &.{ home, ".local", "bin" });
-    defer allocator.free(bin_dir);
+    // Brew install path: preferred when brew is available and tool declares a formula
+    var used_brew = false;
+    if (t.brew_formula) |formula| {
+        if (platform.PackageManager.brew.isAvailable()) {
+            output.printStep("Brew", "→", formula);
+            brewInstall(allocator, formula, force) catch |e| {
+                output.printStep("Brew", "✗", @errorName(e));
+                output.printError("brew install failed");
+                return e;
+            };
+            output.printStep("Brew", "✓", formula);
+            used_brew = true;
+        }
+    }
 
-    const tmp_dir = try std.fmt.allocPrint(allocator, "/tmp/dot-{s}-{s}", .{ t.id, version });
-    defer allocator.free(tmp_dir);
+    if (!used_brew) {
+        // Native install path: download, extract, copy binary
+        const home = std.posix.getenv("HOME") orelse "/tmp";
+        const bin_dir = try std.fs.path.join(allocator, &.{ home, ".local", "bin" });
+        defer allocator.free(bin_dir);
 
-    std.fs.cwd().makePath(tmp_dir) catch {};
-    defer std.fs.cwd().deleteTree(tmp_dir) catch {};
+        const tmp_dir = try std.fmt.allocPrint(allocator, "/tmp/dot-{s}-{s}", .{ t.id, version });
+        defer allocator.free(tmp_dir);
 
-    var ctx = tool_mod.InstallContext{
-        .allocator = allocator,
-        .id = t.id,
-        .version = version,
-        .os = os,
-        .arch = arch,
-        .bin_dir = bin_dir,
-        .tmp_dir = tmp_dir,
-    };
+        std.fs.cwd().makePath(tmp_dir) catch {};
+        defer std.fs.cwd().deleteTree(tmp_dir) catch {};
 
-    // Execute strategy
-    output.printStep("Downloading", "→", "");
-    t.strategy.execute(&ctx) catch |e| {
-        output.printStep("Installation", "✗", @errorName(e));
-        output.printError("Installation failed");
-        return e;
-    };
-    output.printStep("Installation", "✓", bin_dir);
+        var ctx = tool_mod.InstallContext{
+            .allocator = allocator,
+            .id = t.id,
+            .version = version,
+            .os = os,
+            .arch = arch,
+            .bin_dir = bin_dir,
+            .tmp_dir = tmp_dir,
+        };
 
-    // Shell integration
-    const sh = platform.Shell.detect();
-    if (sh != .unknown) {
-        if (t.shell_completions) |completions| {
-            if (completions.forShell(sh)) |config| {
-                shell_mod.ensureSourced(sh, allocator) catch {};
-                shell_mod.addSection(sh, t.id, config, allocator) catch {};
-                output.printStep("Shell integration", "✓", sh.name());
-            } else {
-                output.printStep("Shell integration", "-", "no config for this shell");
+        output.printStep("Downloading", "→", "");
+        t.strategy.execute(&ctx) catch |e| {
+            output.printStep("Installation", "✗", @errorName(e));
+            output.printError("Installation failed");
+            return e;
+        };
+        output.printStep("Installation", "✓", bin_dir);
+
+        // Shell integration (brew handles its own PATH and completions)
+        const sh = platform.Shell.detect();
+        if (sh != .unknown) {
+            if (t.shell_completions) |completions| {
+                if (completions.forShell(sh)) |config| {
+                    shell_mod.ensureSourced(sh, allocator) catch {};
+                    shell_mod.addSection(sh, t.id, config, allocator) catch {};
+                    output.printStep("Shell integration", "✓", sh.name());
+                } else {
+                    output.printStep("Shell integration", "-", "no config for this shell");
+                }
             }
         }
     }
 
-    // Post-install
+    // Post-install runs regardless of install method (e.g. helm plugins)
     if (t.post_install) |pi| {
         switch (pi) {
             .helm_plugins => |plugins| {
@@ -212,7 +228,8 @@ fn installTool(
     }
 
     // Update state
-    try state.addTool(t.id, version, @tagName(t.strategy));
+    const method = if (used_brew) "brew" else @tagName(t.strategy);
+    try state.addTool(t.id, version, method);
 
     // Success
     output.printSuccess(t.name, null);
@@ -225,6 +242,23 @@ fn installTool(
         }
         output.printResources(res_items.items);
         for (res_items.items) |item| allocator.free(item);
+    }
+}
+
+fn brewInstall(allocator: std.mem.Allocator, formula: []const u8, force: bool) !void {
+    // `brew reinstall` always reinstalls; `brew install` is a no-op if already present
+    const brew_cmd: []const u8 = if (force) "reinstall" else "install";
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "brew", brew_cmd, formula },
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+
+    if (result.term.Exited != 0) {
+        const msg = std.mem.trim(u8, result.stderr, " \n\r\t");
+        if (msg.len > 0) std.debug.print("   {s}\n", .{msg});
+        return error.BrewInstallFailed;
     }
 }
 

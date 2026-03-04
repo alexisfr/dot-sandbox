@@ -6,6 +6,7 @@ pub const def: tool.Tool = .{
     .description = "The Kubernetes Package Manager",
     .groups = &.{.k8s},
     .homepage = "https://helm.sh",
+    .brew_formula = "helm",
     .version_source = .{ .github_release = .{
         .repo = "helm/helm",
         .filter = "v3.",

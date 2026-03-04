@@ -493,6 +493,10 @@ pub const Tool = struct {
     homepage: []const u8,
     version_source: VersionSource,
     strategy: InstallStrategy,
+    /// If set and brew is available, install via `brew install <formula>` instead
+    /// of the native strategy. Use tap-prefixed names for third-party taps,
+    /// e.g. "hashicorp/tap/terraform".
+    brew_formula: ?[]const u8 = null,
     shell_completions: ?ShellCompletions = null,
     post_install: ?PostInstall = null,
     quick_start: []const []const u8 = &.{},

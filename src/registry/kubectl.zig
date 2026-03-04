@@ -6,6 +6,7 @@ pub const def: tool.Tool = .{
     .description = "The Kubernetes command-line tool",
     .groups = &.{.k8s},
     .homepage = "https://kubernetes.io/docs/reference/kubectl/",
+    .brew_formula = "kubernetes-cli",
     .version_source = .{ .k8s_stable_txt = {} },
     .strategy = .{ .direct_binary = .{
         .url_template = "https://dl.k8s.io/release/v{version}/bin/{os}/{arch}/kubectl",

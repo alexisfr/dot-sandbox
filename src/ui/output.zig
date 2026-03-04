@@ -22,6 +22,7 @@ fn stepEmoji(step: []const u8) []const u8 {
     if (std.mem.startsWith(u8, step, "Link")) return "🔗";
     if (std.mem.startsWith(u8, step, "Valid")) return "✅";
     if (std.mem.startsWith(u8, step, "Cleanup")) return "🧹";
+    if (std.mem.startsWith(u8, step, "Brew")) return "🍺";
     return "• ";
 }
 

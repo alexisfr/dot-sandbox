@@ -6,6 +6,7 @@ pub const def: tool.Tool = .{
     .description = "Command line interface for Oracle Cloud Infrastructure",
     .groups = &.{.cloud},
     .homepage = "https://docs.oracle.com/en-us/iaas/tools/oci-cli/latest/",
+    .brew_formula = "oci-cli",
     .version_source = .{ .pypi = .{ .package = "oci-cli" } },
     .strategy = .{ .pip_venv = .{
         .package = "oci-cli",

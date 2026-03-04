@@ -6,6 +6,7 @@ pub const def: tool.Tool = .{
     .description = "GitHub's official command line tool",
     .groups = &.{.utils},
     .homepage = "https://cli.github.com",
+    .brew_formula = "gh",
     .version_source = .{ .github_release = .{ .repo = "cli/cli" } },
     .strategy = .{ .github_release = .{
         .url_template = "https://github.com/cli/cli/releases/download/v{version}/gh_{version}_{os}_{arch}.tar.gz",

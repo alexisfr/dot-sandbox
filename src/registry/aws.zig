@@ -6,6 +6,7 @@ pub const def: tool.Tool = .{
     .description = "Unified command line interface for Amazon Web Services",
     .groups = &.{.cloud},
     .homepage = "https://aws.amazon.com/cli/",
+    .brew_formula = "awscli",
     .version_source = .{ .github_release = .{ .repo = "aws/aws-cli" } },
     .strategy = .{ .tarball = .{
         .url_template = "https://awscli.amazonaws.com/awscli-exe-{os}-{arch}.zip",
