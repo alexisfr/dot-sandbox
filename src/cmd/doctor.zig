@@ -1,14 +1,7 @@
 const std = @import("std");
 const state_mod = @import("../state.zig");
-const registry = @import("../registry/mod.zig");
 const platform = @import("../platform.zig");
-
-const GREEN = "\x1b[1;32m";
-const RED = "\x1b[1;31m";
-const YELLOW = "\x1b[1;33m";
-const CYAN = "\x1b[0;36m";
-const BOLD = "\x1b[1m";
-const RESET = "\x1b[0m";
+const output = @import("../ui/output.zig");
 
 pub fn run(
     allocator: std.mem.Allocator,
@@ -17,7 +10,7 @@ pub fn run(
 ) !void {
     _ = args;
 
-    std.debug.print("\n{s}🔍 Running system checks...{s}\n\n", .{ BOLD, RESET });
+    output.printDoctorHeader();
 
     var pass: usize = 0;
     var warn: usize = 0;
@@ -26,23 +19,23 @@ pub fn run(
     // Platform
     const os = platform.Os.current();
     const arch = platform.Arch.current();
-    checkOk("OS", os.name(), &pass);
-    checkOk("Arch", arch.goName(), &pass);
+    output.printCheckPass("OS", os.name()); pass += 1;
+    output.printCheckPass("Arch", arch.goName()); pass += 1;
 
     // Shell
     const sh = platform.Shell.detect();
-    checkOk("Shell", sh.name(), &pass);
+    output.printCheckPass("Shell", sh.name()); pass += 1;
 
     // Package manager
     const pm = platform.PackageManager.detect();
     if (pm != .unknown) {
-        checkOk("Package Manager", pm.command() orelse "unknown", &pass);
+        output.printCheckPass("Package Manager", pm.command() orelse "unknown"); pass += 1;
     } else {
-        checkWarn("Package Manager", "none detected", &warn);
+        output.printCheckWarn("Package Manager", "none detected"); warn += 1;
     }
 
     // Installed tools: verify binaries exist in ~/.local/bin
-    std.debug.print("\n{s}Installed Tools:{s}\n", .{ CYAN, RESET });
+    output.printDoctorSection("Installed Tools");
 
     const home = std.posix.getenv("HOME") orelse "/tmp";
     var it = state.tools.iterator();
@@ -51,24 +44,25 @@ pub fn run(
         const bin_path = std.fs.path.join(allocator, &.{ home, ".local", "bin", id }) catch continue;
         defer allocator.free(bin_path);
 
-        std.fs.cwd().access(bin_path, .{}) catch {
-            checkFail(id, "binary missing from ~/.local/bin", &fail);
-            continue;
-        };
-        checkOk(id, bin_path, &pass);
+        if (std.fs.cwd().access(bin_path, .{})) |_| {
+            output.printCheckPass(id, bin_path); pass += 1;
+        } else |_| {
+            output.printCheckFail(id, "binary missing from ~/.local/bin"); fail += 1;
+        }
     }
 
     // Shell integration file
-    std.debug.print("\n{s}Shell Integration:{s}\n", .{ CYAN, RESET });
+    output.printDoctorSection("Shell Integration");
+
     const integ_path = std.fs.path.join(allocator, &.{
         home, ".local", "bin", sh.integrationFileName(),
     }) catch null;
     if (integ_path) |p| {
         defer allocator.free(p);
         if (std.fs.cwd().access(p, .{})) |_| {
-            checkOk("Integration file", p, &pass);
+            output.printCheckPass("Integration file", p); pass += 1;
         } else |_| {
-            checkWarn("Integration file", "not found (run a tool install to create it)", &warn);
+            output.printCheckWarn("Integration file", "not found (run a tool install to create it)"); warn += 1;
         }
     }
 
@@ -79,35 +73,11 @@ pub fn run(
     if (plugin_dir) |p| {
         defer allocator.free(p);
         if (std.fs.cwd().access(p, .{})) |_| {
-            checkOk("Plugin dir", p, &pass);
+            output.printCheckPass("Plugin dir", p); pass += 1;
         } else |_| {
-            checkWarn("Plugin dir", "not found (created on first plugin install)", &warn);
+            output.printCheckWarn("Plugin dir", "not found (created on first plugin install)"); warn += 1;
         }
     }
 
-    summarize(pass, warn, fail);
-}
-
-fn checkOk(label: []const u8, detail: []const u8, pass: *usize) void {
-    std.debug.print("  {s}✓{s} {s:<24} {s}\n", .{ GREEN, RESET, label, detail });
-    pass.* += 1;
-}
-
-fn checkWarn(label: []const u8, detail: []const u8, warn: *usize) void {
-    std.debug.print("  {s}⚠{s}  {s:<24} {s}\n", .{ YELLOW, RESET, label, detail });
-    warn.* += 1;
-}
-
-fn checkFail(label: []const u8, detail: []const u8, fail: *usize) void {
-    std.debug.print("  {s}✗{s} {s:<24} {s}\n", .{ RED, RESET, label, detail });
-    fail.* += 1;
-}
-
-fn summarize(pass: usize, warn: usize, fail: usize) void {
-    std.debug.print("\n{s}Summary:{s} {s}{d} passed{s}, {s}{d} warnings{s}, {s}{d} failed{s}\n\n", .{
-        BOLD,   RESET,
-        GREEN,  pass, RESET,
-        YELLOW, warn, RESET,
-        RED,    fail, RESET,
-    });
+    output.printDoctorSummary(pass, warn, fail);
 }

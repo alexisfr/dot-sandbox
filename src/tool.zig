@@ -2,6 +2,7 @@ const std = @import("std");
 const http = @import("http.zig");
 const platform = @import("platform.zig");
 const archive = @import("archive.zig");
+const output = @import("ui/output.zig");
 
 pub const Group = enum { k8s, cloud, iac, containers, utils, terminal };
 
@@ -182,7 +183,7 @@ pub const InstallStrategy = union(enum) {
             const archive_path = try std.fs.path.join(ctx.allocator, &.{ ctx.tmp_dir, filename });
             defer ctx.allocator.free(archive_path);
 
-            std.debug.print("   Downloading {s}\n", .{url});
+            output.printDownloading(url);
             try http.download(ctx.allocator, url, archive_path);
 
             // Verify checksum if available
@@ -190,7 +191,7 @@ pub const InstallStrategy = union(enum) {
                 const csum_url = try renderTemplate(ctx.allocator, tmpl, ctx);
                 defer ctx.allocator.free(csum_url);
                 verifyChecksum(ctx.allocator, archive_path, csum_url) catch |e| {
-                    std.debug.print("   Warning: checksum verification failed: {}\n", .{e});
+                    output.printChecksumWarning(@errorName(e));
                 };
             }
 
@@ -228,7 +229,7 @@ pub const InstallStrategy = union(enum) {
             const tmp_bin = try std.fs.path.join(ctx.allocator, &.{ ctx.tmp_dir, ctx.id });
             defer ctx.allocator.free(tmp_bin);
 
-            std.debug.print("   Downloading {s}\n", .{url});
+            output.printDownloading(url);
             try http.download(ctx.allocator, url, tmp_bin);
 
             try installBinary(ctx, tmp_bin);
@@ -260,7 +261,7 @@ pub const InstallStrategy = union(enum) {
             );
             defer ctx.allocator.free(archive_path);
 
-            std.debug.print("   Downloading {s}\n", .{url});
+            output.printDownloading(url);
             try http.download(ctx.allocator, url, archive_path);
 
             const extract_dir = try std.fmt.allocPrint(ctx.allocator, "{s}/extract", .{ctx.tmp_dir});
@@ -289,7 +290,7 @@ pub const InstallStrategy = union(enum) {
         pub fn execute(self: SystemPackage, ctx: *InstallContext) !void {
             const pm = platform.PackageManager.detect();
             const pkg_name = self.packageFor(pm) orelse {
-                std.debug.print("   No package found for package manager {s}\n", .{@tagName(pm)});
+                output.printNoPackageManager(@tagName(pm));
                 return error.NoPackageForManager;
             };
 
@@ -300,7 +301,7 @@ pub const InstallStrategy = union(enum) {
             try argv.appendSlice(ctx.allocator, install_args);
             try argv.append(ctx.allocator, pkg_name);
 
-            std.debug.print("   Running: {s} {s}\n", .{ install_args[0], pkg_name });
+            output.printRunningCmd(install_args[0], pkg_name);
 
             const result = try std.process.Child.run(.{
                 .allocator = ctx.allocator,
@@ -310,7 +311,7 @@ pub const InstallStrategy = union(enum) {
             defer ctx.allocator.free(result.stderr);
 
             if (result.term.Exited != 0) {
-                std.debug.print("   Package install failed\n", .{});
+                output.printDetail("Package install failed");
                 return error.PackageInstallFailed;
             }
         }
@@ -398,7 +399,7 @@ pub const InstallStrategy = union(enum) {
             const archive_path = try std.fs.path.join(ctx.allocator, &.{ ctx.tmp_dir, filename });
             defer ctx.allocator.free(archive_path);
 
-            std.debug.print("   Downloading {s}\n", .{url});
+            output.printDownloading(url);
             try http.download(ctx.allocator, url, archive_path);
 
             const extract_dir = try std.fmt.allocPrint(ctx.allocator, "{s}/extract", .{ctx.tmp_dir});
@@ -554,7 +555,7 @@ fn installBinary(ctx: *InstallContext, src_path: []const u8) !void {
     ctx.allocator.free(chmod.stdout);
     ctx.allocator.free(chmod.stderr);
 
-    std.debug.print("   Installed to {s}\n", .{dest});
+    output.printInstalledTo(dest);
 }
 
 /// Fetch and verify SHA256 checksum from url against local file.

@@ -6,22 +6,23 @@ const status_cmd = @import("cmd/status.zig");
 const doctor_cmd = @import("cmd/doctor.zig");
 const upgrade_cmd = @import("cmd/upgrade.zig");
 const plugin_cmd = @import("cmd/plugin.zig");
+const output = @import("ui/output.zig");
 
 pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
     if (argv.len < 2) {
-        printUsage();
+        output.printHelp();
         return;
     }
 
     const command: []const u8 = argv[1];
 
     if (std.mem.eql(u8, command, "--version") or std.mem.eql(u8, command, "-v")) {
-        std.debug.print("dot version 0.1.0\n", .{});
+        output.printVersion();
         return;
     }
 
     if (std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h") or std.mem.eql(u8, command, "help")) {
-        printUsage();
+        output.printHelp();
         return;
     }
 
@@ -33,7 +34,6 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
     }
     const args = rest.items;
 
-    // Commands that don't need state
     if (std.mem.eql(u8, command, "list")) {
         var state = try state_mod.State.init(allocator);
         defer state.deinit();
@@ -46,7 +46,6 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
         return doctor_cmd.run(allocator, args, &state);
     }
 
-    // Commands that need state
     if (std.mem.eql(u8, command, "install")) {
         var state = try state_mod.State.init(allocator);
         defer state.deinit();
@@ -76,8 +75,7 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
         return;
     }
 
-    std.debug.print("Unknown command: {s}\n", .{command});
-    std.debug.print("Run 'dot --help' for usage.\n", .{});
+    output.printUnknownCommand(command);
 }
 
 /// Try to dispatch to an external dot-<cmd> plugin executable.
@@ -86,7 +84,6 @@ fn tryPluginDispatch(allocator: std.mem.Allocator, cmd: []const u8, args: []cons
     const plugin_exe = std.fmt.allocPrint(allocator, "dot-{s}", .{cmd}) catch return false;
     defer allocator.free(plugin_exe);
 
-    // Check if it exists in PATH
     const check = std.process.Child.run(.{
         .allocator = allocator,
         .argv = &.{ "sh", "-c", std.fmt.allocPrint(allocator, "command -v {s}", .{plugin_exe}) catch return false },
@@ -96,14 +93,12 @@ fn tryPluginDispatch(allocator: std.mem.Allocator, cmd: []const u8, args: []cons
 
     if (check.term.Exited != 0) return false;
 
-    // Build argv for the plugin
     var plugin_argv: std.ArrayList([]const u8) = .empty;
     defer plugin_argv.deinit(allocator);
 
     plugin_argv.append(allocator, plugin_exe) catch return false;
     for (args) |a| plugin_argv.append(allocator, a) catch return false;
 
-    // Exec the plugin
     var child = std.process.Child.init(plugin_argv.items, allocator);
     child.stdin_behavior = .Inherit;
     child.stdout_behavior = .Inherit;
@@ -111,38 +106,4 @@ fn tryPluginDispatch(allocator: std.mem.Allocator, cmd: []const u8, args: []cons
     child.spawn() catch return false;
     _ = child.wait() catch {};
     return true;
-}
-
-fn printUsage() void {
-    std.debug.print(
-        \\
-        \\+--------------------------------------------------+
-        \\|  dot — DevOps Toolbox v0.1.0                     |
-        \\+--------------------------------------------------+
-        \\
-        \\Usage: dot <command> [options]
-        \\
-        \\Commands:
-        \\  install <tool> [version]    Install a tool
-        \\  install --group <group>     Install all tools in a group
-        \\  list [--group <group>]      List available tools
-        \\  status                      Show installed tools and versions
-        \\  upgrade [tool]              Upgrade one or all tools
-        \\  doctor                      Check system health
-        \\  plugin <subcommand>         Manage plugins
-        \\
-        \\Groups:  k8s, cloud, iac, containers, utils, terminal, all
-        \\
-        \\Plugin subcommands:
-        \\  plugin list
-        \\  plugin install <url>
-        \\  plugin uninstall <name>
-        \\  plugin update [name]
-        \\
-        \\Options:
-        \\  --version, -v     Show version
-        \\  --help,    -h     Show this help
-        \\
-        \\
-    , .{});
 }

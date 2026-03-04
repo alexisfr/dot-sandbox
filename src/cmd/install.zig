@@ -12,8 +12,7 @@ pub fn run(
     state: *state_mod.State,
 ) !void {
     if (args.len == 0) {
-        std.debug.print("Usage: dot install <tool> [version] [--force]\n", .{});
-        std.debug.print("       dot install --group <group> [--force]\n", .{});
+        output.printInstallUsage();
         return;
     }
 
@@ -44,7 +43,7 @@ pub fn run(
     } else if (tool_name.len > 0) {
         try installTool(allocator, tool_name, version_arg, force, state);
     } else {
-        std.debug.print("Error: no tool or group specified\n", .{});
+        output.printError("no tool or group specified");
     }
 }
 
@@ -55,8 +54,7 @@ fn installGroup(
     state: *state_mod.State,
 ) !void {
     const group = parseGroup(group_name) orelse {
-        std.debug.print("Error: unknown group '{s}'\n", .{group_name});
-        std.debug.print("Available groups: k8s, cloud, iac, containers, utils, terminal, all\n", .{});
+        output.printUnknownGroup(group_name);
         return;
     };
 
@@ -70,15 +68,15 @@ fn installGroup(
     }
 
     if (tools.len == 0) {
-        std.debug.print("No tools found in group '{s}'\n", .{group_name});
+        output.printNoToolsInGroup(group_name);
         return;
     }
 
-    std.debug.print("Installing group '{s}' ({d} tools)...\n\n", .{ group_name, tools.len });
+    output.printGroupInstall(group_name, tools.len);
 
     for (tools) |t| {
         installTool(allocator, t.id, null, force, state) catch |e| {
-            std.debug.print("  Failed to install {s}: {}\n", .{ t.id, e });
+            output.printGroupToolError(t.id, e);
         };
     }
 }
@@ -91,8 +89,7 @@ fn installTool(
     state: *state_mod.State,
 ) !void {
     const t = registry.findById(id) orelse {
-        std.debug.print("Error: unknown tool '{s}'\n", .{id});
-        std.debug.print("Run 'dot list' to see available tools\n", .{});
+        output.printUnknownTool(id);
         return;
     };
 
@@ -104,9 +101,9 @@ fn installTool(
         version = try allocator.dupe(u8, v);
         version_owned = true;
     } else {
-        std.debug.print("🔍 Fetching latest version for {s}...\n", .{t.name});
+        output.printFetchingVersion(t.name);
         version = t.version_source.resolve(allocator) catch |e| {
-            std.debug.print("Warning: could not fetch version ({s}), using 'latest'\n", .{@errorName(e)});
+            output.printVersionFetchWarning(@errorName(e));
             version = try allocator.dupe(u8, "latest");
             version_owned = true;
             // avoid double-set below
@@ -151,7 +148,6 @@ fn installTool(
     const src_line = try std.fmt.allocPrint(allocator, "Source: {s}", .{t.homepage});
     defer allocator.free(src_line);
     output.printSummary(&.{ pkg_line, plat_line, src_line });
-    std.debug.print("\n", .{});
 
     output.printStep("Pre-checks", "✓", "Ready");
 
@@ -257,7 +253,7 @@ fn brewInstall(allocator: std.mem.Allocator, formula: []const u8, force: bool) !
 
     if (result.term.Exited != 0) {
         const msg = std.mem.trim(u8, result.stderr, " \n\r\t");
-        if (msg.len > 0) std.debug.print("   {s}\n", .{msg});
+        if (msg.len > 0) output.printDetail(msg);
         return error.BrewInstallFailed;
     }
 }
@@ -271,11 +267,7 @@ fn installHelmPlugins(allocator: std.mem.Allocator, plugins: []const []const u8)
         defer allocator.free(result.stdout);
         defer allocator.free(result.stderr);
 
-        if (result.term.Exited == 0) {
-            std.debug.print("   ✓ {s}\n", .{plugin_url});
-        } else {
-            std.debug.print("   - {s} (skipped or already installed)\n", .{plugin_url});
-        }
+        output.printHelmPlugin(plugin_url, result.term.Exited == 0);
     }
 }
 
