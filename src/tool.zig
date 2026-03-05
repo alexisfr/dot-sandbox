@@ -19,6 +19,9 @@ pub const VersionSource = union(enum) {
         repo: []const u8,
         /// If non-null, only tags that start with this prefix are considered.
         filter: ?[]const u8 = null,
+        /// If non-null, strip this prefix from the tag to form the version string.
+        /// e.g. strip_prefix = "jq-" turns tag "jq-1.8.1" into version "1.8.1".
+        strip_prefix: ?[]const u8 = null,
     };
 
     pub const Hashicorp = struct {
@@ -77,8 +80,7 @@ pub const VersionSource = union(enum) {
             if (gh.filter) |prefix| {
                 if (!std.mem.startsWith(u8, tag, prefix)) continue;
             }
-            // Strip leading 'v' if present
-            const ver = if (tag.len > 0 and tag[0] == 'v') tag[1..] else tag;
+            const ver = tagToVersion(tag, gh.strip_prefix);
             return allocator.dupe(u8, ver);
         }
         return error.VersionNotFound;
@@ -506,6 +508,18 @@ pub const Tool = struct {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+/// Convert a GitHub tag_name to a clean version string.
+/// Strips a leading 'v' unconditionally, then strips strip_prefix if provided.
+/// e.g. "v3.15.0" → "3.15.0", "jq-1.8.1" with strip_prefix="jq-" → "1.8.1"
+pub fn tagToVersion(tag: []const u8, strip_prefix: ?[]const u8) []const u8 {
+    var ver = tag;
+    if (ver.len > 0 and ver[0] == 'v') ver = ver[1..];
+    if (strip_prefix) |pfx| {
+        if (std.mem.startsWith(u8, ver, pfx)) ver = ver[pfx.len..];
+    }
+    return ver;
+}
+
 /// Replace {version}, {os}, {arch} placeholders in a template string.
 pub fn renderTemplate(allocator: std.mem.Allocator, tmpl: []const u8, ctx: *const InstallContext) ![]u8 {
     var result: std.ArrayList(u8) = .empty;
@@ -612,4 +626,30 @@ test "renderTemplate" {
     defer alloc.free(result);
 
     try std.testing.expectEqualStrings("helm-v3.15.0-linux-amd64.tar.gz", result);
+}
+
+test "tagToVersion: strips leading v" {
+    try std.testing.expectEqualStrings("3.15.0", tagToVersion("v3.15.0", null));
+}
+
+test "tagToVersion: no v prefix unchanged" {
+    try std.testing.expectEqualStrings("3.15.0", tagToVersion("3.15.0", null));
+}
+
+test "tagToVersion: strip_prefix removes custom prefix" {
+    try std.testing.expectEqualStrings("1.8.1", tagToVersion("jq-1.8.1", "jq-"));
+}
+
+test "tagToVersion: strip_prefix not present leaves tag unchanged" {
+    try std.testing.expectEqualStrings("1.8.1", tagToVersion("1.8.1", "jq-"));
+}
+
+test "tagToVersion: v prefix stripped before strip_prefix applied" {
+    // hypothetical: tag "vjq-1.0" with strip_prefix="jq-" → "1.0"
+    try std.testing.expectEqualStrings("1.0", tagToVersion("vjq-1.0", "jq-"));
+}
+
+test "tagToVersion: empty tag" {
+    try std.testing.expectEqualStrings("", tagToVersion("", null));
+    try std.testing.expectEqualStrings("", tagToVersion("", "jq-"));
 }
