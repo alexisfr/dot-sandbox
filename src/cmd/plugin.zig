@@ -3,6 +3,7 @@ const state_mod = @import("../state.zig");
 const platform = @import("../platform.zig");
 const shell_mod = @import("../shell.zig");
 const output = @import("../ui/output.zig");
+const validate = @import("../validate.zig");
 
 pub fn run(
     allocator: std.mem.Allocator,
@@ -61,6 +62,11 @@ fn installPlugin(
     source: []const u8,
     state: *state_mod.State,
 ) !void {
+    if (!validate.isValidPluginSource(source)) {
+        output.printError("invalid plugin source: must be an https/http URL or a local path");
+        return error.InvalidPluginSource;
+    }
+
     const home = std.posix.getenv("HOME") orelse return error.NoHome;
     const plugin_dir = try std.fs.path.join(allocator, &.{
         home, ".local", "share", "dot", "plugins",
@@ -153,6 +159,11 @@ fn uninstallPlugin(
     name: []const u8,
     state: *state_mod.State,
 ) !void {
+    if (!validate.isValidToolId(name)) {
+        output.printError("invalid plugin name");
+        return error.InvalidPluginName;
+    }
+
     if (!state.plugins.contains(name)) {
         output.printPluginNotFound(name);
         return;
@@ -196,4 +207,26 @@ fn pluginNameFromSource(source: []const u8) []const u8 {
     const base = std.fs.path.basename(source);
     const stripped = if (std.mem.endsWith(u8, base, ".git")) base[0 .. base.len - 4] else base;
     return if (std.mem.startsWith(u8, stripped, "dot-")) stripped[4..] else stripped;
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+test "pluginNameFromSource: git URL with .git suffix" {
+    try std.testing.expectEqualStrings("myplugin", pluginNameFromSource("https://github.com/org/myplugin.git"));
+}
+
+test "pluginNameFromSource: git URL without .git suffix" {
+    try std.testing.expectEqualStrings("myplugin", pluginNameFromSource("https://github.com/org/myplugin"));
+}
+
+test "pluginNameFromSource: dot- prefix stripped" {
+    try std.testing.expectEqualStrings("myplugin", pluginNameFromSource("https://github.com/org/dot-myplugin.git"));
+}
+
+test "pluginNameFromSource: local path" {
+    try std.testing.expectEqualStrings("my-plugin.sh", pluginNameFromSource("./my-plugin.sh"));
+}
+
+test "pluginNameFromSource: absolute path" {
+    try std.testing.expectEqualStrings("my-plugin", pluginNameFromSource("/usr/local/bin/my-plugin"));
 }

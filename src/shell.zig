@@ -83,7 +83,6 @@ pub fn addSection(
 
     const file = std.fs.cwd().openFile(integration_path, .{}) catch |e| switch (e) {
         error.FileNotFound => {
-            // Create file with the section
             const new_content = try std.fmt.allocPrint(allocator, "\n{s}\n{s}\n{s}\n", .{
                 begin_marker,
                 config,
@@ -99,6 +98,54 @@ pub fn addSection(
     file.close();
     defer allocator.free(existing);
 
+    const new_content = try rebuildWithSection(existing, begin_marker, end_marker, config, allocator);
+    defer allocator.free(new_content);
+    try writeFile(integration_path, new_content);
+}
+
+/// Remove a tool's section from the integration file.
+pub fn removeSection(
+    shell: platform.Shell,
+    tool_name: []const u8,
+    allocator: std.mem.Allocator,
+) !void {
+    const home = std.posix.getenv("HOME") orelse return error.NoHome;
+    const integration_path = try std.fs.path.join(
+        allocator,
+        &.{ home, ".local", "bin", shell.integrationFileName() },
+    );
+    defer allocator.free(integration_path);
+
+    const upper_name = try allocator.dupe(u8, tool_name);
+    defer allocator.free(upper_name);
+    for (upper_name) |*c| c.* = std.ascii.toUpper(c.*);
+
+    const begin_marker = try std.fmt.allocPrint(allocator, "# BEGIN {s}", .{upper_name});
+    defer allocator.free(begin_marker);
+    const end_marker = try std.fmt.allocPrint(allocator, "# END {s}", .{upper_name});
+    defer allocator.free(end_marker);
+
+    const file = std.fs.cwd().openFile(integration_path, .{}) catch return;
+    const existing = try file.readToEndAlloc(allocator, 4 * 1024 * 1024);
+    file.close();
+    defer allocator.free(existing);
+
+    const new_content = try rebuildWithoutSection(existing, begin_marker, end_marker, allocator);
+    defer allocator.free(new_content);
+    try writeFile(integration_path, new_content);
+}
+
+// ─── Pure text helpers (also used in tests) ───────────────────────────────────
+
+/// Given existing file content, insert or replace the marked section with config.
+/// Returns caller-owned slice.
+pub fn rebuildWithSection(
+    existing: []const u8,
+    begin_marker: []const u8,
+    end_marker: []const u8,
+    config: []const u8,
+    allocator: std.mem.Allocator,
+) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
 
@@ -137,36 +184,17 @@ pub fn addSection(
         try out.append(allocator, '\n');
     }
 
-    try writeFile(integration_path, out.items);
+    return out.toOwnedSlice(allocator);
 }
 
-/// Remove a tool's section from the integration file.
-pub fn removeSection(
-    shell: platform.Shell,
-    tool_name: []const u8,
+/// Given existing file content, return new content with the marked section removed.
+/// Returns caller-owned slice.
+pub fn rebuildWithoutSection(
+    existing: []const u8,
+    begin_marker: []const u8,
+    end_marker: []const u8,
     allocator: std.mem.Allocator,
-) !void {
-    const home = std.posix.getenv("HOME") orelse return error.NoHome;
-    const integration_path = try std.fs.path.join(
-        allocator,
-        &.{ home, ".local", "bin", shell.integrationFileName() },
-    );
-    defer allocator.free(integration_path);
-
-    const upper_name = try allocator.dupe(u8, tool_name);
-    defer allocator.free(upper_name);
-    for (upper_name) |*c| c.* = std.ascii.toUpper(c.*);
-
-    const begin_marker = try std.fmt.allocPrint(allocator, "# BEGIN {s}", .{upper_name});
-    defer allocator.free(begin_marker);
-    const end_marker = try std.fmt.allocPrint(allocator, "# END {s}", .{upper_name});
-    defer allocator.free(end_marker);
-
-    const file = std.fs.cwd().openFile(integration_path, .{}) catch return;
-    const existing = try file.readToEndAlloc(allocator, 4 * 1024 * 1024);
-    file.close();
-    defer allocator.free(existing);
-
+) ![]u8 {
     var out: std.ArrayList(u8) = .empty;
     defer out.deinit(allocator);
 
@@ -183,7 +211,7 @@ pub fn removeSection(
         }
     }
 
-    try writeFile(integration_path, out.items);
+    return out.toOwnedSlice(allocator);
 }
 
 /// Ensure the plugin directory is in PATH in the integration file.
@@ -254,4 +282,111 @@ fn writeFile(path: []const u8, content: []const u8) !void {
     const file = try std.fs.cwd().createFile(path, .{});
     defer file.close();
     try file.writeAll(content);
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+test "rebuildWithSection: append to empty content" {
+    const result = try rebuildWithSection(
+        "",
+        "# BEGIN HELM",
+        "# END HELM",
+        "source <(helm completion bash)",
+        std.testing.allocator,
+    );
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(std.mem.indexOf(u8, result, "# BEGIN HELM") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "# END HELM") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "source <(helm completion bash)") != null);
+}
+
+test "rebuildWithSection: append to existing content without section" {
+    const existing = "export PATH=$PATH:/usr/local/bin\n";
+    const result = try rebuildWithSection(
+        existing,
+        "# BEGIN HELM",
+        "# END HELM",
+        "source <(helm completion bash)",
+        std.testing.allocator,
+    );
+    defer std.testing.allocator.free(result);
+    // Original content preserved
+    try std.testing.expect(std.mem.indexOf(u8, result, "export PATH") != null);
+    // Section appended
+    try std.testing.expect(std.mem.indexOf(u8, result, "# BEGIN HELM") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "source <(helm completion bash)") != null);
+}
+
+test "rebuildWithSection: replace existing section" {
+    const existing =
+        "export PATH=$PATH:/usr/local/bin\n" ++
+        "# BEGIN HELM\n" ++
+        "source <(helm completion bash)\n" ++
+        "# END HELM\n" ++
+        "export EDITOR=vim\n";
+
+    const result = try rebuildWithSection(
+        existing,
+        "# BEGIN HELM",
+        "# END HELM",
+        "source <(helm completion zsh)",
+        std.testing.allocator,
+    );
+    defer std.testing.allocator.free(result);
+    // New content present
+    try std.testing.expect(std.mem.indexOf(u8, result, "source <(helm completion zsh)") != null);
+    // Old content removed
+    try std.testing.expect(std.mem.indexOf(u8, result, "source <(helm completion bash)") == null);
+    // Surrounding content preserved
+    try std.testing.expect(std.mem.indexOf(u8, result, "export PATH") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "export EDITOR=vim") != null);
+}
+
+test "rebuildWithSection: idempotent on second apply" {
+    const existing = "";
+    const config = "source <(helm completion bash)";
+
+    const first = try rebuildWithSection(existing, "# BEGIN HELM", "# END HELM", config, std.testing.allocator);
+    defer std.testing.allocator.free(first);
+    const second = try rebuildWithSection(first, "# BEGIN HELM", "# END HELM", config, std.testing.allocator);
+    defer std.testing.allocator.free(second);
+
+    // Marker appears exactly once
+    var count: usize = 0;
+    var it = std.mem.splitSequence(u8, second, "# BEGIN HELM");
+    while (it.next()) |_| count += 1;
+    try std.testing.expectEqual(@as(usize, 2), count); // split produces n+1 parts for n occurrences
+}
+
+test "rebuildWithoutSection: removes section" {
+    const existing =
+        "export PATH=$PATH:/usr/local/bin\n" ++
+        "# BEGIN HELM\n" ++
+        "source <(helm completion bash)\n" ++
+        "# END HELM\n" ++
+        "export EDITOR=vim\n";
+
+    const result = try rebuildWithoutSection(existing, "# BEGIN HELM", "# END HELM", std.testing.allocator);
+    defer std.testing.allocator.free(result);
+
+    try std.testing.expect(std.mem.indexOf(u8, result, "# BEGIN HELM") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "# END HELM") == null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "source <(helm completion bash)") == null);
+    // Surrounding content preserved
+    try std.testing.expect(std.mem.indexOf(u8, result, "export PATH") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "export EDITOR=vim") != null);
+}
+
+test "rebuildWithoutSection: no-op if section absent" {
+    const existing = "export PATH=$PATH:/usr/local/bin\nexport EDITOR=vim\n";
+    const result = try rebuildWithoutSection(existing, "# BEGIN HELM", "# END HELM", std.testing.allocator);
+    defer std.testing.allocator.free(result);
+    try std.testing.expect(std.mem.indexOf(u8, result, "export PATH") != null);
+    try std.testing.expect(std.mem.indexOf(u8, result, "export EDITOR=vim") != null);
+}
+
+test "rebuildWithoutSection: empty content stays empty-ish" {
+    const result = try rebuildWithoutSection("", "# BEGIN HELM", "# END HELM", std.testing.allocator);
+    defer std.testing.allocator.free(result);
+    try std.testing.expectEqualStrings("\n", result); // splitScalar on "" produces one empty token
 }

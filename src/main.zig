@@ -17,4 +17,10 @@ test {
     _ = @import("platform.zig");
     _ = @import("tool.zig");
     _ = @import("registry/mod.zig");
+    _ = @import("validate.zig");
+    _ = @import("state.zig");
+    _ = @import("shell.zig");
+    _ = @import("cmd/install.zig");
+    _ = @import("cmd/plugin.zig");
+    _ = @import("cli.zig");
 }

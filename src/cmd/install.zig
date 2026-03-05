@@ -5,6 +5,35 @@ const registry = @import("../registry/mod.zig");
 const platform = @import("../platform.zig");
 const shell_mod = @import("../shell.zig");
 const output = @import("../ui/output.zig");
+const validate = @import("../validate.zig");
+
+pub const InstallArgs = struct {
+    force: bool = false,
+    group_mode: bool = false,
+    group_name: []const u8 = "",
+    tool_name: []const u8 = "",
+    version_arg: ?[]const u8 = null,
+};
+
+pub fn parseInstallArgs(args: []const []const u8) InstallArgs {
+    var result = InstallArgs{};
+    var i: usize = 0;
+    while (i < args.len) : (i += 1) {
+        const a = args[i];
+        if (std.mem.eql(u8, a, "--force")) {
+            result.force = true;
+        } else if (std.mem.eql(u8, a, "--group") or std.mem.eql(u8, a, "-g")) {
+            result.group_mode = true;
+            i += 1;
+            if (i < args.len) result.group_name = args[i];
+        } else if (result.tool_name.len == 0 and !result.group_mode) {
+            result.tool_name = a;
+        } else if (result.version_arg == null and result.tool_name.len > 0) {
+            result.version_arg = a;
+        }
+    }
+    return result;
+}
 
 pub fn run(
     allocator: std.mem.Allocator,
@@ -16,32 +45,22 @@ pub fn run(
         return;
     }
 
-    var force = false;
-    var version_arg: ?[]const u8 = null;
-    var group_mode = false;
-    var group_name: []const u8 = "";
-    var tool_name: []const u8 = "";
+    const parsed = parseInstallArgs(args);
 
-    var i: usize = 0;
-    while (i < args.len) : (i += 1) {
-        const a = args[i];
-        if (std.mem.eql(u8, a, "--force")) {
-            force = true;
-        } else if (std.mem.eql(u8, a, "--group") or std.mem.eql(u8, a, "-g")) {
-            group_mode = true;
-            i += 1;
-            if (i < args.len) group_name = args[i];
-        } else if (tool_name.len == 0 and !group_mode) {
-            tool_name = a;
-        } else if (version_arg == null and tool_name.len > 0) {
-            version_arg = a;
+    if (parsed.group_mode) {
+        try installGroup(allocator, parsed.group_name, parsed.force, state);
+    } else if (parsed.tool_name.len > 0) {
+        if (!validate.isValidToolId(parsed.tool_name)) {
+            output.printError("invalid tool name");
+            return;
         }
-    }
-
-    if (group_mode) {
-        try installGroup(allocator, group_name, force, state);
-    } else if (tool_name.len > 0) {
-        try installTool(allocator, tool_name, version_arg, force, state);
+        if (parsed.version_arg) |v| {
+            if (!validate.isValidVersion(v)) {
+                output.printError("invalid version string");
+                return;
+            }
+        }
+        try installTool(allocator, parsed.tool_name, parsed.version_arg, parsed.force, state);
     } else {
         output.printError("no tool or group specified");
     }
@@ -58,13 +77,14 @@ fn installGroup(
         return;
     };
 
-    var buf: [registry.all_tools.len]*const tool_mod.Tool = undefined;
+    var buf_arr: [registry.all_tools.len]*const tool_mod.Tool = undefined;
+    const buf: []*const tool_mod.Tool = &buf_arr;
     var tools: []const *const tool_mod.Tool = &.{};
 
     if (group_name.len == 3 and std.mem.eql(u8, group_name, "all")) {
         tools = registry.all_tools;
     } else {
-        registry.findByGroup(group, &buf, &tools);
+        registry.findByGroup(group, buf, &tools);
     }
 
     if (tools.len == 0) {
@@ -307,4 +327,77 @@ fn parseGroup(name: []const u8) ?tool_mod.Group {
     if (std.mem.eql(u8, name, "utils")) return .utils;
     if (std.mem.eql(u8, name, "terminal")) return .terminal;
     return null;
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+test "parseInstallArgs: tool name only" {
+    const a = parseInstallArgs(&.{"helm"});
+    try std.testing.expectEqualStrings("helm", a.tool_name);
+    try std.testing.expect(a.version_arg == null);
+    try std.testing.expect(!a.force);
+    try std.testing.expect(!a.group_mode);
+}
+
+test "parseInstallArgs: tool name with version" {
+    const a = parseInstallArgs(&.{ "helm", "3.15.0" });
+    try std.testing.expectEqualStrings("helm", a.tool_name);
+    try std.testing.expectEqualStrings("3.15.0", a.version_arg.?);
+}
+
+test "parseInstallArgs: --force flag" {
+    const a = parseInstallArgs(&.{ "--force", "helm" });
+    try std.testing.expect(a.force);
+    try std.testing.expectEqualStrings("helm", a.tool_name);
+}
+
+test "parseInstallArgs: --force after tool" {
+    const a = parseInstallArgs(&.{ "helm", "--force" });
+    // --force before tool_name is set is fine; after tool_name is set, --force
+    // isn't parsed as a special flag in current logic — it would be version_arg.
+    // This test documents current behavior.
+    try std.testing.expectEqualStrings("helm", a.tool_name);
+}
+
+test "parseInstallArgs: --group flag" {
+    const a = parseInstallArgs(&.{ "--group", "k8s" });
+    try std.testing.expect(a.group_mode);
+    try std.testing.expectEqualStrings("k8s", a.group_name);
+    try std.testing.expect(!a.force);
+}
+
+test "parseInstallArgs: -g shorthand" {
+    const a = parseInstallArgs(&.{ "-g", "iac" });
+    try std.testing.expect(a.group_mode);
+    try std.testing.expectEqualStrings("iac", a.group_name);
+}
+
+test "parseInstallArgs: --force with group" {
+    const a = parseInstallArgs(&.{ "--force", "--group", "cloud" });
+    try std.testing.expect(a.force);
+    try std.testing.expect(a.group_mode);
+    try std.testing.expectEqualStrings("cloud", a.group_name);
+}
+
+test "parseInstallArgs: empty args" {
+    const a = parseInstallArgs(&.{});
+    try std.testing.expectEqualStrings("", a.tool_name);
+    try std.testing.expect(!a.group_mode);
+    try std.testing.expect(!a.force);
+}
+
+test "parseGroup: known groups" {
+    try std.testing.expectEqual(tool_mod.Group.k8s, parseGroup("k8s").?);
+    try std.testing.expectEqual(tool_mod.Group.cloud, parseGroup("cloud").?);
+    try std.testing.expectEqual(tool_mod.Group.iac, parseGroup("iac").?);
+    try std.testing.expectEqual(tool_mod.Group.containers, parseGroup("containers").?);
+    try std.testing.expectEqual(tool_mod.Group.utils, parseGroup("utils").?);
+    try std.testing.expectEqual(tool_mod.Group.terminal, parseGroup("terminal").?);
+}
+
+test "parseGroup: unknown groups return null" {
+    try std.testing.expect(parseGroup("unknown") == null);
+    try std.testing.expect(parseGroup("") == null);
+    try std.testing.expect(parseGroup("K8S") == null); // case-sensitive
+    try std.testing.expect(parseGroup("all") == null); // "all" is handled separately
 }

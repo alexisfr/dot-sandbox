@@ -7,6 +7,7 @@ const doctor_cmd = @import("cmd/doctor.zig");
 const upgrade_cmd = @import("cmd/upgrade.zig");
 const plugin_cmd = @import("cmd/plugin.zig");
 const output = @import("ui/output.zig");
+const validate = @import("validate.zig");
 
 pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
     if (argv.len < 2) {
@@ -71,11 +72,58 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
     }
 
     // Plugin dispatch: dot <cmd> → try dot-<cmd> in PATH
-    if (tryPluginDispatch(allocator, command, args)) {
+    // Validate command name before use to prevent shell injection via plugin_exe construction.
+    if (validate.isValidCommandName(command) and tryPluginDispatch(allocator, command, args)) {
         return;
     }
 
-    output.printUnknownCommand(command);
+    // Suggest the closest known command if the edit distance is small enough.
+    const known = [_][]const u8{ "list", "install", "status", "upgrade", "doctor", "plugin" };
+    var best_dist: usize = std.math.maxInt(usize);
+    var best_cmd: []const u8 = "";
+    for (known) |k| {
+        const d = editDistance(command, k);
+        if (d < best_dist) {
+            best_dist = d;
+            best_cmd = k;
+        }
+    }
+    if (best_dist <= 3) {
+        output.printUnknownCommandWithSuggestion(command, best_cmd);
+    } else {
+        output.printUnknownCommand(command);
+    }
+}
+
+/// Simple iterative Levenshtein distance, capped at 256-char inputs.
+fn editDistance(a: []const u8, b: []const u8) usize {
+    if (a.len == 0) return b.len;
+    if (b.len == 0) return a.len;
+
+    // Use two rows to avoid O(n*m) allocation.
+    var prev: [257]usize = undefined;
+    var curr: [257]usize = undefined;
+
+    const blen = @min(b.len, 256);
+    const alen = @min(a.len, 256);
+
+    for (0..blen + 1) |j| prev[j] = j;
+
+    for (0..alen) |i| {
+        curr[0] = i + 1;
+        for (0..blen) |j| {
+            const cost: usize = if (a[i] == b[j]) 0 else 1;
+            curr[j + 1] = @min(
+                curr[j] + 1,
+                @min(prev[j + 1] + 1, prev[j] + cost),
+            );
+        }
+        const tmp = prev;
+        prev = curr;
+        curr = tmp;
+    }
+
+    return prev[blen];
 }
 
 /// Try to dispatch to an external dot-<cmd> plugin executable.
@@ -84,9 +132,12 @@ fn tryPluginDispatch(allocator: std.mem.Allocator, cmd: []const u8, args: []cons
     const plugin_exe = std.fmt.allocPrint(allocator, "dot-{s}", .{cmd}) catch return false;
     defer allocator.free(plugin_exe);
 
+    const check_cmd = std.fmt.allocPrint(allocator, "command -v {s}", .{plugin_exe}) catch return false;
+    defer allocator.free(check_cmd);
+
     const check = std.process.Child.run(.{
         .allocator = allocator,
-        .argv = &.{ "sh", "-c", std.fmt.allocPrint(allocator, "command -v {s}", .{plugin_exe}) catch return false },
+        .argv = &.{ "sh", "-c", check_cmd },
     }) catch return false;
     defer allocator.free(check.stdout);
     defer allocator.free(check.stderr);
@@ -106,4 +157,37 @@ fn tryPluginDispatch(allocator: std.mem.Allocator, cmd: []const u8, args: []cons
     child.spawn() catch return false;
     _ = child.wait() catch {};
     return true;
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+test "editDistance: identical strings" {
+    try std.testing.expectEqual(@as(usize, 0), editDistance("list", "list"));
+}
+
+test "editDistance: transposition costs 2" {
+    // Levenshtein counts a swap as 2 ops (delete + insert); "lsit" vs "list" = 2
+    try std.testing.expectEqual(@as(usize, 2), editDistance("lsit", "list"));
+}
+
+test "editDistance: one substitution" {
+    try std.testing.expectEqual(@as(usize, 1), editDistance("lisT", "list"));
+}
+
+test "editDistance: one insertion" {
+    try std.testing.expectEqual(@as(usize, 1), editDistance("ist", "list"));
+}
+
+test "editDistance: one deletion" {
+    try std.testing.expectEqual(@as(usize, 1), editDistance("listt", "list"));
+}
+
+test "editDistance: empty strings" {
+    try std.testing.expectEqual(@as(usize, 0), editDistance("", ""));
+    try std.testing.expectEqual(@as(usize, 4), editDistance("", "list"));
+    try std.testing.expectEqual(@as(usize, 4), editDistance("list", ""));
+}
+
+test "editDistance: completely different" {
+    try std.testing.expect(editDistance("xyz", "list") > 3);
 }

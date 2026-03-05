@@ -418,3 +418,9 @@ pub fn printUnknownCommand(cmd: []const u8) void {
     std.debug.print("Unknown command: {s}\n", .{cmd});
     std.debug.print("Run 'dot --help' for usage.\n", .{});
 }
+
+pub fn printUnknownCommandWithSuggestion(cmd: []const u8, suggestion: []const u8) void {
+    std.debug.print("Unknown command: {s}\n", .{cmd});
+    std.debug.print("Did you mean '{s}'?\n", .{suggestion});
+    std.debug.print("Run 'dot --help' for usage.\n", .{});
+}

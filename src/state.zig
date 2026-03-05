@@ -31,7 +31,14 @@ pub const State = struct {
         try std.fs.cwd().makePath(config_dir);
 
         const path = try std.fs.path.join(allocator, &.{ config_dir, "state.json" });
+        defer allocator.free(path); // initAt dupes it, so free our copy
+        return initAt(allocator, path);
+    }
 
+    /// Like init but with an explicit state file path. Used in tests to avoid
+    /// touching $HOME/.config/dot/state.json.
+    pub fn initAt(allocator: std.mem.Allocator, state_path: []const u8) !State {
+        const path = try allocator.dupe(u8, state_path);
         const arena = std.heap.ArenaAllocator.init(allocator);
         const tools = std.StringHashMap(ToolEntry).init(allocator);
         const plugins = std.StringHashMap(PluginEntry).init(allocator);
@@ -247,3 +254,133 @@ pub const State = struct {
         try self.save();
     }
 };
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+test "State: empty state has no tools" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
+    defer std.testing.allocator.free(state_path);
+
+    var state = try State.initAt(std.testing.allocator, state_path);
+    defer state.deinit();
+
+    try std.testing.expect(!state.isInstalled("helm"));
+    try std.testing.expect(state.getVersion("helm") == null);
+    try std.testing.expectEqual(@as(usize, 0), state.tools.count());
+    try std.testing.expectEqual(@as(usize, 0), state.plugins.count());
+}
+
+test "State: addTool and isInstalled" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
+    defer std.testing.allocator.free(state_path);
+
+    var state = try State.initAt(std.testing.allocator, state_path);
+    defer state.deinit();
+
+    try std.testing.expect(!state.isInstalled("helm"));
+    try state.addTool("helm", "3.15.0", "github_release");
+    try std.testing.expect(state.isInstalled("helm"));
+    try std.testing.expectEqualStrings("3.15.0", state.getVersion("helm").?);
+}
+
+test "State: removeTool" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
+    defer std.testing.allocator.free(state_path);
+
+    var state = try State.initAt(std.testing.allocator, state_path);
+    defer state.deinit();
+
+    try state.addTool("kubectl", "1.29.0", "direct_binary");
+    try std.testing.expect(state.isInstalled("kubectl"));
+    try state.removeTool("kubectl");
+    try std.testing.expect(!state.isInstalled("kubectl"));
+}
+
+test "State: addPlugin and removePlugin" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
+    defer std.testing.allocator.free(state_path);
+
+    var state = try State.initAt(std.testing.allocator, state_path);
+    defer state.deinit();
+
+    try std.testing.expect(!state.plugins.contains("myplugin"));
+    try state.addPlugin("myplugin", "https://github.com/org/myplugin.git", "latest");
+    try std.testing.expect(state.plugins.contains("myplugin"));
+
+    const entry = state.plugins.get("myplugin").?;
+    try std.testing.expectEqualStrings("https://github.com/org/myplugin.git", entry.source_url);
+    try std.testing.expectEqualStrings("latest", entry.version);
+
+    try state.removePlugin("myplugin");
+    try std.testing.expect(!state.plugins.contains("myplugin"));
+}
+
+test "State: save and load round-trip" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
+    defer std.testing.allocator.free(state_path);
+
+    // Write state
+    {
+        var state = try State.initAt(std.testing.allocator, state_path);
+        defer state.deinit();
+        try state.addTool("terraform", "1.7.0", "hashicorp_release");
+        try state.addPlugin("my-plugin", "https://example.com/plugin.git", "latest");
+    }
+
+    // Reload and verify
+    {
+        var state = try State.initAt(std.testing.allocator, state_path);
+        defer state.deinit();
+        try std.testing.expect(state.isInstalled("terraform"));
+        try std.testing.expectEqualStrings("1.7.0", state.getVersion("terraform").?);
+        try std.testing.expect(state.plugins.contains("my-plugin"));
+    }
+}
+
+test "State: multiple tools" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
+    defer std.testing.allocator.free(state_path);
+
+    var state = try State.initAt(std.testing.allocator, state_path);
+    defer state.deinit();
+
+    try state.addTool("helm", "3.15.0", "github_release");
+    try state.addTool("kubectl", "1.29.0", "direct_binary");
+    try state.addTool("k9s", "0.32.0", "github_release");
+
+    try std.testing.expectEqual(@as(usize, 3), state.tools.count());
+    try std.testing.expect(state.isInstalled("helm"));
+    try std.testing.expect(state.isInstalled("kubectl"));
+    try std.testing.expect(state.isInstalled("k9s"));
+    try std.testing.expect(!state.isInstalled("terraform"));
+}
