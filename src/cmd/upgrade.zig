@@ -1,37 +1,214 @@
 const std = @import("std");
+const tool_mod = @import("../tool.zig");
 const state_mod = @import("../state.zig");
 const registry = @import("../registry/mod.zig");
 const install_cmd = @import("install.zig");
 const output = @import("../ui/output.zig");
+
+pub const UpgradeArgs = struct {
+    force: bool = false,
+    target: ?[]const u8 = null,
+};
+
+pub fn parseUpgradeArgs(args: []const []const u8) UpgradeArgs {
+    var result = UpgradeArgs{};
+    for (args) |a| {
+        if (std.mem.eql(u8, a, "--force")) {
+            result.force = true;
+        } else if (result.target == null) {
+            result.target = a;
+        }
+    }
+    return result;
+}
+
+const HELP =
+    \\Usage: dot upgrade [tool|group] [--force]
+    \\
+    \\Upgrade installed tools to their latest available version.
+    \\
+    \\Arguments:
+    \\  [tool]    Upgrade a single tool (e.g. helm)
+    \\  [group]   Upgrade all installed tools in a group (e.g. k8s)
+    \\  (none)    Upgrade all installed tools
+    \\
+    \\Options:
+    \\  --force       Also upgrade pinned tools and force reinstall
+    \\                even if already at the latest version
+    \\  --help, -h    Show this help
+    \\
+    \\Groups:  k8s, cloud, iac, containers, utils, terminal, all
+    \\
+    \\Pinning:
+    \\  Tools installed with an explicit version (dot install terraform 1.8.0)
+    \\  are pinned and skipped by upgrade unless --force is used.
+    \\
+    \\Examples:
+    \\  dot upgrade
+    \\  dot upgrade helm
+    \\  dot upgrade k8s
+    \\  dot upgrade terraform --force
+    \\
+;
 
 pub fn run(
     allocator: std.mem.Allocator,
     args: []const []const u8,
     state: *state_mod.State,
 ) !void {
-    if (args.len == 0) {
-        output.printUpgradeAll();
+    for (args) |a| {
+        if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
+            output.printRaw(HELP);
+            return;
+        }
+    }
+
+    const parsed = parseUpgradeArgs(args);
+    const force = parsed.force;
+    const target = parsed.target;
+
+    if (target) |name| {
+        // Group upgrade: only upgrade tools in the group that are already installed
+        if (install_cmd.parseGroup(name)) |group| {
+            var buf_arr: [registry.all_tools.len]*const tool_mod.Tool = undefined;
+            const buf: []*const tool_mod.Tool = &buf_arr;
+            var group_tools: []const *const tool_mod.Tool = &.{};
+            registry.findByGroup(group, buf, &group_tools);
+
+            for (group_tools) |t| {
+                if (!state.isInstalled(t.id)) continue;
+                if (force) {
+                    install_cmd.run(allocator, &.{ t.id, "--force" }, state) catch |e| {
+                        output.printFmt("Failed to upgrade {s}: {s}\n", .{ t.id, @errorName(e) });
+                    };
+                } else {
+                    install_cmd.run(allocator, &.{t.id}, state) catch |e| {
+                        output.printFmt("Failed to upgrade {s}: {s}\n", .{ t.id, @errorName(e) });
+                    };
+                }
+            }
+            return;
+        }
+
+        // Single tool upgrade: dot upgrade helm
+        if (registry.findById(name) == null) {
+            output.printUnknownTool(name);
+            return;
+        }
+        if (force) {
+            try install_cmd.run(allocator, &.{ name, "--force" }, state);
+        } else {
+            try install_cmd.run(allocator, &.{name}, state);
+        }
+    } else {
+        // Upgrade all installed tools
+        output.printRaw("Upgrading all installed tools...\n\n");
+
         var it = state.tools.iterator();
         var to_upgrade: std.ArrayList([]const u8) = .empty;
         defer to_upgrade.deinit(allocator);
-
         while (it.next()) |kv| {
             try to_upgrade.append(allocator, kv.key_ptr.*);
         }
 
         for (to_upgrade.items) |id| {
-            const upgrade_args = [_][]const u8{ id, "--force" };
-            install_cmd.run(allocator, &upgrade_args, state) catch |e| {
-                output.printUpgradeFailed(id, e);
-            };
+            if (force) {
+                install_cmd.run(allocator, &.{ id, "--force" }, state) catch |e| {
+                    output.printFmt("Failed to upgrade {s}: {s}\n", .{ id, @errorName(e) });
+                };
+            } else {
+                install_cmd.run(allocator, &.{id}, state) catch |e| {
+                    output.printFmt("Failed to upgrade {s}: {s}\n", .{ id, @errorName(e) });
+                };
+            }
         }
-    } else {
-        const id = args[0];
-        if (registry.findById(id) == null) {
-            output.printUnknownTool(id);
-            return;
-        }
-        const upgrade_args = [_][]const u8{ id, "--force" };
-        try install_cmd.run(allocator, &upgrade_args, state);
     }
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+test "parseUpgradeArgs: no args → upgrade all, no force" {
+    const a = parseUpgradeArgs(&.{});
+    try std.testing.expect(a.target == null);
+    try std.testing.expect(!a.force);
+}
+
+test "parseUpgradeArgs: tool name" {
+    const a = parseUpgradeArgs(&.{"helm"});
+    try std.testing.expectEqualStrings("helm", a.target.?);
+    try std.testing.expect(!a.force);
+}
+
+test "parseUpgradeArgs: group name" {
+    const a = parseUpgradeArgs(&.{"k8s"});
+    try std.testing.expectEqualStrings("k8s", a.target.?);
+    try std.testing.expect(!a.force);
+    // group detection happens in run(), not here — parseGroup("k8s") should return non-null
+    try std.testing.expect(install_cmd.parseGroup(a.target.?) != null);
+}
+
+test "parseUpgradeArgs: --force flag alone" {
+    const a = parseUpgradeArgs(&.{"--force"});
+    try std.testing.expect(a.target == null);
+    try std.testing.expect(a.force);
+}
+
+test "parseUpgradeArgs: tool with --force" {
+    const a = parseUpgradeArgs(&.{ "helm", "--force" });
+    try std.testing.expectEqualStrings("helm", a.target.?);
+    try std.testing.expect(a.force);
+}
+
+test "parseUpgradeArgs: --force before tool" {
+    const a = parseUpgradeArgs(&.{ "--force", "helm" });
+    try std.testing.expectEqualStrings("helm", a.target.?);
+    try std.testing.expect(a.force);
+}
+
+test "parseUpgradeArgs: group with --force" {
+    const a = parseUpgradeArgs(&.{ "iac", "--force" });
+    try std.testing.expectEqualStrings("iac", a.target.?);
+    try std.testing.expect(a.force);
+    try std.testing.expect(install_cmd.parseGroup(a.target.?) != null);
+}
+
+test "parseUpgradeArgs: unknown target is not a group" {
+    const a = parseUpgradeArgs(&.{"not-a-group"});
+    try std.testing.expectEqualStrings("not-a-group", a.target.?);
+    try std.testing.expect(install_cmd.parseGroup(a.target.?) == null);
+}
+
+test "group upgrade only touches installed tools" {
+    // Build a k8s group tool list and verify that a tool NOT in state would be skipped.
+    var buf_arr: [registry.all_tools.len]*const tool_mod.Tool = undefined;
+    const buf: []*const tool_mod.Tool = &buf_arr;
+    var group_tools: []const *const tool_mod.Tool = &.{};
+    registry.findByGroup(.k8s, buf, &group_tools);
+    try std.testing.expect(group_tools.len > 0);
+
+    // Simulate an empty state — none of the k8s tools are installed.
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
+    defer std.testing.allocator.free(state_path);
+
+    var state = try state_mod.State.initAt(std.testing.allocator, state_path);
+    defer state.deinit();
+
+    // None installed → all would be skipped by the isInstalled() filter.
+    var would_upgrade: usize = 0;
+    for (group_tools) |t| {
+        if (state.isInstalled(t.id)) would_upgrade += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 0), would_upgrade);
+
+    // Mark one as installed → only that one would be upgraded.
+    try state.addTool("helm", "3.0.0", "github_release", false);
+    would_upgrade = 0;
+    for (group_tools) |t| {
+        if (state.isInstalled(t.id)) would_upgrade += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 1), would_upgrade);
 }

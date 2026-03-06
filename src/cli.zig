@@ -5,25 +5,63 @@ const list_cmd = @import("cmd/list.zig");
 const status_cmd = @import("cmd/status.zig");
 const doctor_cmd = @import("cmd/doctor.zig");
 const upgrade_cmd = @import("cmd/upgrade.zig");
+const uninstall_cmd = @import("cmd/uninstall.zig");
 const plugin_cmd = @import("cmd/plugin.zig");
 const output = @import("ui/output.zig");
 const validate = @import("validate.zig");
 
+const VERSION = "dot version 0.1.0\n";
+
+const HELP =
+    \\
+    \\+--------------------------------------------------+
+    \\|  dot — DevOps Toolbox v0.1.0                     |
+    \\+--------------------------------------------------+
+    \\
+    \\Usage: dot <command> [options]
+    \\
+    \\Commands:
+    \\  install <tool> [version]    Install a tool (pin with explicit version)
+    \\  install --group <group>     Install all tools in a group
+    \\  uninstall <tool>            Uninstall a tool
+    \\  list [--group <group>]      List available tools
+    \\  status                      Show installed tools and versions
+    \\  upgrade [tool|group]        Upgrade installed tools (skips pinned)
+    \\  upgrade --force             Force upgrade, including pinned tools
+    \\  doctor                      Check system health
+    \\  plugin <subcommand>         Manage plugins
+    \\
+    \\Groups:  k8s, cloud, iac, containers, utils, terminal, all
+    \\
+    \\Plugin subcommands:
+    \\  plugin list
+    \\  plugin install <url>
+    \\  plugin uninstall <name>
+    \\  plugin update [name]
+    \\
+    \\Options:
+    \\  --version, -v         Show version
+    \\  --help, -h            Show this help
+    \\  <command> --help      Show help for a specific command
+    \\
+    \\
+;
+
 pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
     if (argv.len < 2) {
-        output.printHelp();
+        output.printRaw(HELP);
         return;
     }
 
     const command: []const u8 = argv[1];
 
     if (std.mem.eql(u8, command, "--version") or std.mem.eql(u8, command, "-v")) {
-        output.printVersion();
+        output.printRaw(VERSION);
         return;
     }
 
     if (std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h") or std.mem.eql(u8, command, "help")) {
-        output.printHelp();
+        output.printRaw(HELP);
         return;
     }
 
@@ -65,6 +103,12 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
         return upgrade_cmd.run(allocator, args, &state);
     }
 
+    if (std.mem.eql(u8, command, "uninstall") or std.mem.eql(u8, command, "remove")) {
+        var state = try state_mod.State.init(allocator);
+        defer state.deinit();
+        return uninstall_cmd.run(allocator, args, &state);
+    }
+
     if (std.mem.eql(u8, command, "plugin")) {
         var state = try state_mod.State.init(allocator);
         defer state.deinit();
@@ -78,7 +122,7 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
     }
 
     // Suggest the closest known command if the edit distance is small enough.
-    const known = [_][]const u8{ "list", "install", "status", "upgrade", "doctor", "plugin" };
+    const known = [_][]const u8{ "list", "install", "uninstall", "status", "upgrade", "doctor", "plugin" };
     var best_dist: usize = std.math.maxInt(usize);
     var best_cmd: []const u8 = "";
     for (known) |k| {
@@ -89,9 +133,9 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
         }
     }
     if (best_dist <= 3) {
-        output.printUnknownCommandWithSuggestion(command, best_cmd);
+        output.printFmt("Unknown command: {s}\nDid you mean '{s}'?\nRun 'dot --help' for usage.\n", .{ command, best_cmd });
     } else {
-        output.printUnknownCommand(command);
+        output.printFmt("Unknown command: {s}\nRun 'dot --help' for usage.\n", .{command});
     }
 }
 

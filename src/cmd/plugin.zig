@@ -5,30 +5,59 @@ const shell_mod = @import("../shell.zig");
 const output = @import("../ui/output.zig");
 const validate = @import("../validate.zig");
 
+const HELP =
+    \\Usage: dot plugin <command>
+    \\
+    \\Commands:
+    \\  list                List installed plugins
+    \\  install <url|path>  Install a plugin from a URL or local path
+    \\  uninstall <name>    Remove a plugin
+    \\  update [name]       Update one or all plugins
+    \\
+    \\Options:
+    \\  --help, -h    Show this help
+    \\
+    \\Plugin sources:
+    \\  https://github.com/org/dot-myplugin.git   (git URL)
+    \\  ./my-plugin.sh                            (local path)
+    \\
+    \\Plugins are executables named dot-<name> stored in
+    \\~/.local/share/dot/plugins/ and callable as 'dot <name>'.
+    \\
+;
+
+const INSTALL_HELP = "Usage: dot plugin install <url|path>\n";
+const UNINSTALL_HELP = "Usage: dot plugin uninstall <name>\n";
+
 pub fn run(
     allocator: std.mem.Allocator,
     args: []const []const u8,
     state: *state_mod.State,
 ) !void {
     if (args.len == 0) {
-        output.printPluginUsage();
+        output.printRaw(HELP);
         return;
     }
 
     const sub = args[0];
+
+    if (std.mem.eql(u8, sub, "--help") or std.mem.eql(u8, sub, "-h")) {
+        output.printRaw(HELP);
+        return;
+    }
     const rest = if (args.len > 1) args[1..] else &[_][]const u8{};
 
     if (std.mem.eql(u8, sub, "list")) {
         try listPlugins(state);
     } else if (std.mem.eql(u8, sub, "install")) {
         if (rest.len == 0) {
-            output.printPluginInstallUsage();
+            output.printRaw(INSTALL_HELP);
             return;
         }
         try installPlugin(allocator, rest[0], state);
     } else if (std.mem.eql(u8, sub, "uninstall") or std.mem.eql(u8, sub, "remove")) {
         if (rest.len == 0) {
-            output.printPluginUninstallUsage();
+            output.printRaw(UNINSTALL_HELP);
             return;
         }
         try uninstallPlugin(allocator, rest[0], state);
@@ -36,25 +65,25 @@ pub fn run(
         const name: ?[]const u8 = if (rest.len > 0) rest[0] else null;
         try updatePlugins(allocator, name, state);
     } else {
-        output.printUnknownPluginSubcmd(sub);
-        output.printPluginUsage();
+        output.printFmt("Unknown plugin subcommand: {s}\n", .{sub});
+        output.printRaw(HELP);
     }
 }
 
 fn listPlugins(state: *state_mod.State) !void {
-    output.printPluginListHeader();
+    printPluginListHeader();
 
     if (state.plugins.count() == 0) {
-        output.printPluginEmpty();
+        output.printRaw("  No plugins installed.\n\n  Run 'dot plugin install <url>' to add a plugin.\n\n");
         return;
     }
 
     var it = state.plugins.iterator();
     while (it.next()) |kv| {
         const p = kv.value_ptr.*;
-        output.printPluginRow(kv.key_ptr.*, p.version, p.source_url);
+        printPluginRow(kv.key_ptr.*, p.version, p.source_url);
     }
-    output.printPluginListEnd();
+    output.printRaw("\n");
 }
 
 fn installPlugin(
@@ -76,7 +105,7 @@ fn installPlugin(
 
     const plugin_name = pluginNameFromSource(source);
 
-    output.printPluginInstalling(plugin_name, source);
+    printPluginInstalling(plugin_name, source);
 
     if (std.mem.startsWith(u8, source, "https://") or std.mem.startsWith(u8, source, "http://")) {
         try installFromGit(allocator, source, plugin_name, plugin_dir);
@@ -91,7 +120,7 @@ fn installPlugin(
             .argv = &.{ "chmod", "+x", dest },
         });
     } else {
-        output.printPluginSourceError(source);
+        printPluginSourceError(source);
         return;
     }
 
@@ -101,7 +130,7 @@ fn installPlugin(
     }
 
     try state.addPlugin(plugin_name, source, "latest");
-    output.printPluginInstalled(plugin_name);
+    printPluginInstalled(plugin_name);
 }
 
 fn installFromGit(
@@ -122,7 +151,7 @@ fn installFromGit(
     defer allocator.free(clone_res.stderr);
 
     if (clone_res.term.Exited != 0) {
-        output.printPluginGitError();
+        output.printRaw("  git clone failed\n");
         return error.GitCloneFailed;
     }
 
@@ -151,7 +180,7 @@ fn installFromGit(
         return;
     }
 
-    output.printPluginRepoWarning();
+    printPluginRepoWarning();
 }
 
 fn uninstallPlugin(
@@ -165,7 +194,7 @@ fn uninstallPlugin(
     }
 
     if (!state.plugins.contains(name)) {
-        output.printPluginNotFound(name);
+        output.printFmt("Plugin '{s}' is not installed\n", .{name});
         return;
     }
 
@@ -179,7 +208,7 @@ fn uninstallPlugin(
 
     std.fs.cwd().deleteFile(plugin_path) catch {};
     try state.removePlugin(name);
-    output.printPluginRemoved(name);
+    output.printFmt("Removed plugin 'dot-{s}'\n", .{name});
 }
 
 fn updatePlugins(
@@ -189,7 +218,7 @@ fn updatePlugins(
 ) !void {
     if (name) |n| {
         const entry = state.plugins.get(n) orelse {
-            output.printPluginNotFound(n);
+            output.printFmt("Plugin '{s}' is not installed\n", .{n});
             return;
         };
         try installPlugin(allocator, entry.source_url, state);
@@ -197,10 +226,37 @@ fn updatePlugins(
         var it = state.plugins.iterator();
         while (it.next()) |kv| {
             installPlugin(allocator, kv.value_ptr.*.source_url, state) catch |e| {
-                output.printPluginUpdateFailed(kv.key_ptr.*, e);
+                output.printFmt("Failed to update {s}: {s}\n", .{ kv.key_ptr.*, @errorName(e) });
             };
         }
     }
+}
+
+// ─── Plugin-specific print functions ──────────────────────────────────────────
+
+fn printPluginListHeader() void {
+    std.debug.print("\n{s}{s}Installed Plugins{s}\n\n", .{ output.CYAN, output.BOLD, output.RESET });
+}
+
+fn printPluginRow(name: []const u8, version: []const u8, source: []const u8) void {
+    std.debug.print("  {s}dot-{s}{s}  {s}  {s}\n", .{ output.GREEN, name, output.RESET, version, source });
+}
+
+fn printPluginInstalling(name: []const u8, source: []const u8) void {
+    std.debug.print("{s} Installing plugin '{s}' from {s}...\n", .{ output.SYM_PLUG, name, source });
+}
+
+fn printPluginInstalled(name: []const u8) void {
+    std.debug.print("{s}{s}{s} Plugin 'dot-{s}' installed\n\n", .{ output.GREEN, output.SYM_CHECK, output.RESET, name });
+}
+
+fn printPluginSourceError(source: []const u8) void {
+    std.debug.print("{s}Error:{s} unrecognised source format '{s}'\n", .{ output.RED, output.RESET, source });
+    std.debug.print("  Expected: https://... URL or local path ./plugin\n", .{});
+}
+
+fn printPluginRepoWarning() void {
+    std.debug.print("  {s}Warning:{s} no executable found in repo, copying repo as-is\n", .{ output.YELLOW, output.RESET });
 }
 
 fn pluginNameFromSource(source: []const u8) []const u8 {

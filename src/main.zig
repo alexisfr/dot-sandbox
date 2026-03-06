@@ -22,5 +22,7 @@ test {
     _ = @import("shell.zig");
     _ = @import("cmd/install.zig");
     _ = @import("cmd/plugin.zig");
+    _ = @import("cmd/upgrade.zig");
+    _ = @import("cmd/uninstall.zig");
     _ = @import("cli.zig");
 }

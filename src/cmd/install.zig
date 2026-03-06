@@ -35,14 +35,50 @@ pub fn parseInstallArgs(args: []const []const u8) InstallArgs {
     return result;
 }
 
+const HELP =
+    \\Usage: dot install <tool> [version] [--force]
+    \\       dot install --group <group> [--force]
+    \\
+    \\Install a tool from the registry.
+    \\
+    \\Arguments:
+    \\  <tool>         Tool ID to install (e.g. helm, kubectl)
+    \\  [version]      Pin to a specific version (e.g. 1.8.0)
+    \\  --group, -g    Install all tools in a group
+    \\
+    \\Options:
+    \\  --force        Force reinstall, even if already up to date
+    \\  --help, -h     Show this help
+    \\
+    \\Groups:  k8s, cloud, iac, containers, utils, terminal, all
+    \\
+    \\Pinning:
+    \\  Specifying a version pins the tool — it will be skipped by
+    \\  'dot upgrade' unless --force is used.
+    \\
+    \\Examples:
+    \\  dot install helm
+    \\  dot install terraform 1.8.0
+    \\  dot install --group k8s
+    \\  dot install helm --force
+    \\
+;
+
 pub fn run(
     allocator: std.mem.Allocator,
     args: []const []const u8,
     state: *state_mod.State,
 ) !void {
     if (args.len == 0) {
-        output.printInstallUsage();
+        output.printRaw(HELP);
         return;
+    }
+
+    for (args) |a| {
+        if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
+            output.printRaw(HELP);
+            return;
+        }
     }
 
     const parsed = parseInstallArgs(args);
@@ -73,7 +109,7 @@ fn installGroup(
     state: *state_mod.State,
 ) !void {
     const group = parseGroup(group_name) orelse {
-        output.printUnknownGroup(group_name);
+        printUnknownGroup(group_name);
         return;
     };
 
@@ -88,15 +124,15 @@ fn installGroup(
     }
 
     if (tools.len == 0) {
-        output.printNoToolsInGroup(group_name);
+        output.printFmt("No tools found in group '{s}'\n", .{group_name});
         return;
     }
 
-    output.printGroupInstall(group_name, tools.len);
+    printGroupBanner(group_name, tools.len);
 
     for (tools) |t| {
         installTool(allocator, t.id, null, force, state) catch |e| {
-            output.printGroupToolError(t.id, e);
+            printGroupToolError(t.id, e);
         };
     }
 }
@@ -121,9 +157,9 @@ fn installTool(
         version = try allocator.dupe(u8, v);
         version_owned = true;
     } else {
-        output.printFetchingVersion(t.name);
+        printFetchingVersion(t.name);
         version = t.version_source.resolve(allocator) catch |e| {
-            output.printVersionFetchWarning(@errorName(e));
+            printVersionFetchWarning(@errorName(e));
             version = try allocator.dupe(u8, "latest");
             version_owned = true;
             // avoid double-set below
@@ -134,12 +170,22 @@ fn installTool(
     }
     defer if (version_owned) allocator.free(version);
 
+    // Skip pinned tools unless forced
+    if (!force and version_arg == null) {
+        if (state.isPinned(t.id)) {
+            const pinned_ver = state.getVersion(t.id) orelse "pinned";
+            printBox(t.name, pinned_ver);
+            printPinnedSkip(t.name, pinned_ver);
+            return;
+        }
+    }
+
     // Check system install (not our ~/.local/bin)
     if (!force) {
         if (checkSystemInstall(allocator, t.id)) |sys_path| {
             defer allocator.free(sys_path);
-            output.printBox(t.name, version);
-            output.printSkipSystem(t.name, sys_path, "unknown", version);
+            printBox(t.name, version);
+            printSkipSystem(t.name, sys_path, "unknown", version);
             return;
         }
     }
@@ -148,15 +194,15 @@ fn installTool(
     if (!force) {
         if (state.getVersion(t.id)) |installed_ver| {
             if (std.mem.eql(u8, installed_ver, version)) {
-                output.printBox(t.name, version);
-                output.printAlreadyReady(t.name);
+                printBox(t.name, version);
+                printAlreadyReady(t.name);
                 return;
             }
         }
     }
 
     // Print install box + summary
-    output.printBox(t.name, version);
+    printBox(t.name, version);
 
     const os = platform.Os.current();
     const arch = platform.Arch.current();
@@ -167,7 +213,7 @@ fn installTool(
     defer allocator.free(plat_line);
     const src_line = try std.fmt.allocPrint(allocator, "Source: {s}", .{t.homepage});
     defer allocator.free(src_line);
-    output.printSummary(&.{ pkg_line, plat_line, src_line });
+    printSummary(&.{ pkg_line, plat_line, src_line });
 
     output.printStep("Pre-checks", "✓", "Ready");
 
@@ -177,11 +223,11 @@ fn installTool(
         if (platform.PackageManager.brew.isAvailable()) {
             output.printStep("Brew", "→", formula);
             brewInstall(allocator, formula, force) catch |e| {
-                output.printStep("Brew", "✗", @errorName(e));
+                output.printStep("Brew", output.SYM_FAIL, @errorName(e));
                 output.printError("brew install failed");
                 return e;
             };
-            output.printStep("Brew", "✓", formula);
+            output.printStep("Brew", output.SYM_OK, formula);
             used_brew = true;
         }
     }
@@ -210,11 +256,11 @@ fn installTool(
 
         output.printStep("Downloading", "→", "");
         t.strategy.execute(&ctx) catch |e| {
-            output.printStep("Installation", "✗", @errorName(e));
+            output.printStep("Installation", output.SYM_FAIL, @errorName(e));
             output.printError("Installation failed");
             return e;
         };
-        output.printStep("Installation", "✓", bin_dir);
+        output.printStep("Installation", output.SYM_OK, bin_dir);
 
         // Shell integration (brew handles its own PATH and completions)
         const sh = platform.Shell.detect();
@@ -223,7 +269,7 @@ fn installTool(
                 if (completions.forShell(sh)) |config| {
                     shell_mod.ensureSourced(sh, allocator) catch {};
                     shell_mod.addSection(sh, t.id, config, allocator) catch {};
-                    output.printStep("Shell integration", "✓", sh.name());
+                    output.printStep("Shell integration", output.SYM_OK, sh.name());
                 } else {
                     output.printStep("Shell integration", "-", "no config for this shell");
                 }
@@ -237,26 +283,26 @@ fn installTool(
             .helm_plugins => |plugins| {
                 output.printStep("Plugins", "→", "");
                 installHelmPlugins(allocator, plugins);
-                output.printStep("Plugins", "✓", "");
+                output.printStep("Plugins", output.SYM_OK, "");
             },
             .none => {},
         }
     }
 
-    // Update state
+    // Update state — pin if the user specified an explicit version
     const method = if (used_brew) "brew" else @tagName(t.strategy);
-    try state.addTool(t.id, version, method);
+    try state.addTool(t.id, version, method, version_arg != null);
 
     // Success
-    output.printSuccess(t.name, null);
-    if (t.quick_start.len > 0) output.printQuickStart(t.quick_start);
+    printSuccess(t.name, null);
+    if (t.quick_start.len > 0) printQuickStart(t.quick_start);
     if (t.resources.len > 0) {
         var res_items: std.ArrayList([]const u8) = .empty;
         defer res_items.deinit(allocator);
         for (t.resources) |r| {
             try res_items.append(allocator, try std.fmt.allocPrint(allocator, "{s}: {s}", .{ r.label, r.url }));
         }
-        output.printResources(res_items.items);
+        printResources(res_items.items);
         for (res_items.items) |item| allocator.free(item);
     }
 }
@@ -287,7 +333,7 @@ fn installHelmPlugins(allocator: std.mem.Allocator, plugins: []const []const u8)
         defer allocator.free(result.stdout);
         defer allocator.free(result.stderr);
 
-        output.printHelmPlugin(plugin_url, result.term.Exited == 0);
+        printHelmPlugin(plugin_url, result.term.Exited == 0);
     }
 }
 
@@ -319,7 +365,7 @@ fn checkSystemInstall(allocator: std.mem.Allocator, id: []const u8) ?[]u8 {
     return null;
 }
 
-fn parseGroup(name: []const u8) ?tool_mod.Group {
+pub fn parseGroup(name: []const u8) ?tool_mod.Group {
     if (std.mem.eql(u8, name, "k8s")) return .k8s;
     if (std.mem.eql(u8, name, "cloud")) return .cloud;
     if (std.mem.eql(u8, name, "iac")) return .iac;
@@ -327,6 +373,108 @@ fn parseGroup(name: []const u8) ?tool_mod.Group {
     if (std.mem.eql(u8, name, "utils")) return .utils;
     if (std.mem.eql(u8, name, "terminal")) return .terminal;
     return null;
+}
+
+// ─── Install-specific print functions ─────────────────────────────────────────
+
+fn printBox(tool: []const u8, version: []const u8) void {
+    const inner = 48;
+    std.debug.print("{s}+", .{output.CYAN});
+    for (0..inner) |_| std.debug.print("-", .{});
+    std.debug.print("+{s}\n", .{output.RESET});
+
+    const title_len = tool.len + 1 + version.len + " Installation".len + 1;
+    const padding = if (inner > title_len + 2) inner - title_len - 2 else 0;
+    std.debug.print("{s}|{s} {s}{s}{s} {s} Installation", .{ output.CYAN, output.RESET, output.BOLD, tool, output.RESET, version });
+    for (0..padding) |_| std.debug.print(" ", .{});
+    std.debug.print(" {s}|{s}\n", .{ output.CYAN, output.RESET });
+
+    std.debug.print("{s}+", .{output.CYAN});
+    for (0..inner) |_| std.debug.print("-", .{});
+    std.debug.print("+{s}\n", .{output.RESET});
+}
+
+fn printSummary(items: []const []const u8) void {
+    std.debug.print("\n{s}{s}{s} {s}Summary:{s}\n", .{ output.CYAN, output.SYM_LIST, output.RESET, output.BOLD, output.RESET });
+    for (items) |item| {
+        std.debug.print("  • {s}\n", .{item});
+    }
+    std.debug.print("\n", .{});
+}
+
+fn printSuccess(tool: []const u8, duration_s: ?u64) void {
+    if (duration_s) |d| {
+        std.debug.print("\n{s}{s}{s} {s}{s}{s} installed in {d}s!\n\n", .{
+            output.GREEN, output.SYM_CHECK, output.RESET, output.BOLD, tool, output.RESET, d,
+        });
+    } else {
+        std.debug.print("\n{s}{s}{s} {s}{s}{s} installed!\n\n", .{
+            output.GREEN, output.SYM_CHECK, output.RESET, output.BOLD, tool, output.RESET,
+        });
+    }
+}
+
+fn printPinnedSkip(tool: []const u8, version: []const u8) void {
+    std.debug.print("{s}{s}{s} {s}{s}{s} is pinned at {s} — skipping\n", .{ output.CYAN, output.SYM_PIN, output.RESET, output.BOLD, tool, output.RESET, version });
+    std.debug.print("   To upgrade anyway: dot install {s} --force\n", .{tool});
+}
+
+fn printAlreadyReady(tool: []const u8) void {
+    std.debug.print("\n{s}{s}{s} {s}{s}{s} ready!\n\n", .{ output.GREEN, output.SYM_CHECK, output.RESET, output.BOLD, tool, output.RESET });
+}
+
+fn printQuickStart(cmds: []const []const u8) void {
+    std.debug.print("{s}{s}{s} {s}Quick Start:{s}\n", .{ output.CYAN, output.SYM_BOOKS, output.RESET, output.BOLD, output.RESET });
+    for (cmds) |cmd| {
+        std.debug.print("  $ {s}\n", .{cmd});
+    }
+    std.debug.print("\n", .{});
+}
+
+fn printResources(items: []const []const u8) void {
+    std.debug.print("{s}{s}{s} {s}Resources:{s}\n", .{ output.CYAN, output.SYM_LINK, output.RESET, output.BOLD, output.RESET });
+    for (items) |item| {
+        std.debug.print("  • {s}\n", .{item});
+    }
+}
+
+fn printSkipSystem(tool: []const u8, path: []const u8, sys_ver: []const u8, latest: []const u8) void {
+    std.debug.print("\n{s}{s}{s}  {s}{s}{s} detected via system package manager\n\n", .{
+        output.YELLOW, output.SYM_WARN, output.RESET, output.BOLD, tool, output.RESET,
+    });
+    std.debug.print("  Location: {s}\n", .{path});
+    std.debug.print("  Version:  {s}\n", .{sys_ver});
+    std.debug.print("  Latest:   {s}\n", .{latest});
+    std.debug.print("\n  To install dot's version, run: dot install {s} --force\n\n", .{tool});
+}
+
+fn printFetchingVersion(name: []const u8) void {
+    std.debug.print("{s} Fetching latest version for {s}...\n", .{ output.SYM_SEARCH, name });
+}
+
+fn printVersionFetchWarning(err_name: []const u8) void {
+    std.debug.print("{s}Warning:{s} could not fetch version ({s}), using 'latest'\n", .{ output.YELLOW, output.RESET, err_name });
+}
+
+fn printUnknownGroup(name: []const u8) void {
+    std.debug.print("{s}Error:{s} unknown group '{s}'\n", .{ output.RED, output.RESET, name });
+    std.debug.print("Available groups: k8s, cloud, iac, containers, utils, terminal, all\n", .{});
+}
+
+fn printGroupToolError(id: []const u8, err: anyerror) void {
+    std.debug.print("  {s}Failed{s} to install {s}: {s}\n", .{ output.RED, output.RESET, id, @errorName(err) });
+}
+
+fn printGroupBanner(group_name: []const u8, count: usize) void {
+    std.debug.print("Installing group '{s}' ({d} tools)...\n\n", .{ group_name, count });
+}
+
+fn printHelmPlugin(url: []const u8, ok: bool) void {
+    if (ok) {
+        std.debug.print("   {s}{s}{s} {s}\n", .{ output.GREEN, output.SYM_OK, output.RESET, url });
+    } else {
+        std.debug.print("   {s}-{s} {s} (skipped or already installed)\n", .{ output.DIM, output.RESET, url });
+    }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

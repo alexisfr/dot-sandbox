@@ -205,7 +205,12 @@ pub const State = struct {
         return if (e.version.len > 0) e.version else null;
     }
 
-    pub fn addTool(self: *State, id: []const u8, version: []const u8, method: []const u8) !void {
+    pub fn isPinned(self: *State, id: []const u8) bool {
+        const e = self.tools.get(id) orelse return false;
+        return e.pinned;
+    }
+
+    pub fn addTool(self: *State, id: []const u8, version: []const u8, method: []const u8, pinned: bool) !void {
         const arena_alloc = self.arena.allocator();
 
         // ISO 8601 timestamp
@@ -225,7 +230,7 @@ pub const State = struct {
             .method = try arena_alloc.dupe(u8, method),
             .source = source,
             .status = "installed",
-            .pinned = false,
+            .pinned = pinned,
         });
         try self.save();
     }
@@ -288,7 +293,7 @@ test "State: addTool and isInstalled" {
     defer state.deinit();
 
     try std.testing.expect(!state.isInstalled("helm"));
-    try state.addTool("helm", "3.15.0", "github_release");
+    try state.addTool("helm", "3.15.0", "github_release", false);
     try std.testing.expect(state.isInstalled("helm"));
     try std.testing.expectEqualStrings("3.15.0", state.getVersion("helm").?);
 }
@@ -305,7 +310,7 @@ test "State: removeTool" {
     var state = try State.initAt(std.testing.allocator, state_path);
     defer state.deinit();
 
-    try state.addTool("kubectl", "1.29.0", "direct_binary");
+    try state.addTool("kubectl", "1.29.0", "direct_binary", false);
     try std.testing.expect(state.isInstalled("kubectl"));
     try state.removeTool("kubectl");
     try std.testing.expect(!state.isInstalled("kubectl"));
@@ -348,7 +353,7 @@ test "State: save and load round-trip" {
     {
         var state = try State.initAt(std.testing.allocator, state_path);
         defer state.deinit();
-        try state.addTool("terraform", "1.7.0", "hashicorp_release");
+        try state.addTool("terraform", "1.7.0", "hashicorp_release", false);
         try state.addPlugin("my-plugin", "https://example.com/plugin.git", "latest");
     }
 
@@ -374,13 +379,65 @@ test "State: multiple tools" {
     var state = try State.initAt(std.testing.allocator, state_path);
     defer state.deinit();
 
-    try state.addTool("helm", "3.15.0", "github_release");
-    try state.addTool("kubectl", "1.29.0", "direct_binary");
-    try state.addTool("k9s", "0.32.0", "github_release");
+    try state.addTool("helm", "3.15.0", "github_release", false);
+    try state.addTool("kubectl", "1.29.0", "direct_binary", false);
+    try state.addTool("k9s", "0.32.0", "github_release", false);
 
     try std.testing.expectEqual(@as(usize, 3), state.tools.count());
     try std.testing.expect(state.isInstalled("helm"));
     try std.testing.expect(state.isInstalled("kubectl"));
     try std.testing.expect(state.isInstalled("k9s"));
     try std.testing.expect(!state.isInstalled("terraform"));
+}
+
+test "State: pinned=true is stored and returned" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
+    defer std.testing.allocator.free(state_path);
+
+    var state = try State.initAt(std.testing.allocator, state_path);
+    defer state.deinit();
+
+    try state.addTool("terraform", "1.8.0", "hashicorp_release", true);
+    try std.testing.expect(state.isPinned("terraform"));
+    try std.testing.expectEqualStrings("1.8.0", state.getVersion("terraform").?);
+}
+
+test "State: pinned=false is not pinned" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
+    defer std.testing.allocator.free(state_path);
+
+    var state = try State.initAt(std.testing.allocator, state_path);
+    defer state.deinit();
+
+    try state.addTool("terraform", "1.14.6", "hashicorp_release", false);
+    try std.testing.expect(!state.isPinned("terraform"));
+}
+
+test "State: pinned survives save/load round-trip" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
+    defer std.testing.allocator.free(state_path);
+
+    {
+        var state = try State.initAt(std.testing.allocator, state_path);
+        defer state.deinit();
+        try state.addTool("terraform", "1.8.0", "hashicorp_release", true);
+    }
+    {
+        var state = try State.initAt(std.testing.allocator, state_path);
+        defer state.deinit();
+        try std.testing.expect(state.isPinned("terraform"));
+        try std.testing.expectEqualStrings("1.8.0", state.getVersion("terraform").?);
+    }
 }
