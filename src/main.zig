@@ -16,8 +16,7 @@ pub fn main() !void {
 test {
     _ = @import("platform.zig");
     _ = @import("tool.zig");
-    _ = @import("registry/mod.zig");
-    _ = @import("registry/external.zig");
+    _ = @import("repository/loader.zig");
     _ = @import("validate.zig");
     _ = @import("state.zig");
     _ = @import("shell.zig");

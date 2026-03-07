@@ -7,7 +7,7 @@ const output = @import("../ui/output.zig");
 const HELP =
     \\Usage: dot list [--group <group>]
     \\
-    \\List all tools in the registry with their install status.
+    \\List all tools with their install status.
     \\
     \\Options:
     \\  --group, -g <g>   Show only tools in the given group

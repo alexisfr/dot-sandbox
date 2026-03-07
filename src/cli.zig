@@ -10,7 +10,7 @@ const plugin_cmd = @import("cmd/plugin.zig");
 const repository_cmd = @import("cmd/repository.zig");
 const output = @import("ui/output.zig");
 const validate = @import("validate.zig");
-const registry_ext = @import("registry/external.zig");
+const repo = @import("repository/loader.zig");
 const tool_mod = @import("tool.zig");
 
 const VERSION = "dot version 0.1.0\n";
@@ -83,7 +83,7 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
     }
     const args = rest.items;
 
-    // Commands that don't need the tool registry
+    // Commands that don't need the tool repository
     if (std.mem.eql(u8, command, "status")) {
         var state = try state_mod.State.init(allocator);
         defer state.deinit();
@@ -109,10 +109,10 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
     }
 
     // Commands that need the merged tool list (builtins + external)
-    var builtin = try registry_ext.loadBuiltinTools(allocator);
+    var builtin = try repo.loadBuiltinTools(allocator);
     defer builtin.deinit();
 
-    var external = try registry_ext.loadExternalTools(allocator);
+    var external = try repo.loadExternalTools(allocator);
     defer external.deinit();
 
     const tools = try mergeTools(allocator, builtin.tools, external.tools);

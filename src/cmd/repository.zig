@@ -1,6 +1,6 @@
 const std = @import("std");
 const state_mod = @import("../state.zig");
-const external = @import("../registry/external.zig");
+const loader = @import("../repository/loader.zig");
 const http = @import("../http.zig");
 const output = @import("../ui/output.zig");
 
@@ -71,20 +71,20 @@ fn cmdAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     defer allocator.free(body);
 
     // Parse name from JSON
-    const name = external.parseNameFromJson(allocator, body) catch |e| {
+    const name = loader.parseNameFromJson(allocator, body) catch |e| {
         output.printFmt("{s}Error:{s} repository JSON missing 'name' field ({s})\n", .{ output.RED, output.RESET, @errorName(e) });
         return;
     };
     defer allocator.free(name);
 
-    const tool_count = external.countToolsInJson(allocator, body);
+    const tool_count = loader.countToolsInJson(allocator, body);
 
     // Load existing sources and check for duplicates
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
     const aa = arena.allocator();
 
-    const existing = external.loadRepositories(aa, allocator) catch &.{};
+    const existing = loader.loadRepositories(aa, allocator) catch &.{};
     for (existing) |s| {
         if (std.mem.eql(u8, s.name, name)) {
             output.printFmt("{s}Error:{s} repository '{s}' already added\n", .{ output.RED, output.RESET, name });
@@ -93,7 +93,7 @@ fn cmdAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
 
     // Write cache file
-    const dir = try external.configDir(allocator);
+    const dir = try loader.configDir(allocator);
     defer allocator.free(dir);
     try std.fs.cwd().makePath(dir);
 
@@ -110,7 +110,7 @@ fn cmdAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const now = std.time.timestamp();
     const now_str = try std.fmt.allocPrint(aa, "{d}", .{now});
 
-    var new_sources: std.ArrayList(external.RepositorySource) = .empty;
+    var new_sources: std.ArrayList(loader.RepositorySource) = .empty;
     try new_sources.appendSlice(aa, existing);
     try new_sources.append(aa, .{
         .name = try aa.dupe(u8, name),
@@ -119,7 +119,7 @@ fn cmdAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
         .fetched_at = now_str,
     });
 
-    try external.saveRepositories(allocator, new_sources.items);
+    try loader.saveRepositories(allocator, new_sources.items);
 
     std.debug.print("{s}{s}{s} Added repository '{s}' — {d} tools available\n", .{
         output.GREEN, output.SYM_OK, output.RESET, name, tool_count,
@@ -131,7 +131,7 @@ fn cmdList(allocator: std.mem.Allocator) !void {
     defer arena.deinit();
     const aa = arena.allocator();
 
-    const sources = external.loadRepositories(aa, allocator) catch &.{};
+    const sources = loader.loadRepositories(aa, allocator) catch &.{};
 
     if (sources.len == 0) {
         std.debug.print("No repositories configured.\n\n", .{});
@@ -152,7 +152,7 @@ fn cmdList(allocator: std.mem.Allocator) !void {
         const tool_count = blk: {
             const filename = std.fmt.allocPrint(allocator, "repository-{s}.json", .{s.name}) catch break :blk 0;
             defer allocator.free(filename);
-            const dir = external.configDir(allocator) catch break :blk 0;
+            const dir = loader.configDir(allocator) catch break :blk 0;
             defer allocator.free(dir);
             const path = std.fs.path.join(allocator, &.{ dir, filename }) catch break :blk 0;
             defer allocator.free(path);
@@ -160,7 +160,7 @@ fn cmdList(allocator: std.mem.Allocator) !void {
             defer file.close();
             const content = file.readToEndAlloc(allocator, 10 * 1024 * 1024) catch break :blk 0;
             defer allocator.free(content);
-            break :blk external.countToolsInJson(allocator, content);
+            break :blk loader.countToolsInJson(allocator, content);
         };
 
         // Format fetched time
@@ -198,10 +198,10 @@ fn cmdRemove(allocator: std.mem.Allocator, args: []const []const u8) !void {
     defer arena.deinit();
     const aa = arena.allocator();
 
-    const sources = external.loadRepositories(aa, allocator) catch &.{};
+    const sources = loader.loadRepositories(aa, allocator) catch &.{};
 
     var found = false;
-    var new_sources: std.ArrayList(external.RepositorySource) = .empty;
+    var new_sources: std.ArrayList(loader.RepositorySource) = .empty;
     for (sources) |s| {
         if (std.mem.eql(u8, s.name, name)) {
             found = true;
@@ -215,10 +215,10 @@ fn cmdRemove(allocator: std.mem.Allocator, args: []const []const u8) !void {
         return;
     }
 
-    try external.saveRepositories(allocator, new_sources.items);
+    try loader.saveRepositories(allocator, new_sources.items);
 
     // Delete cache file
-    const dir = external.configDir(allocator) catch null;
+    const dir = loader.configDir(allocator) catch null;
     if (dir) |d| {
         defer allocator.free(d);
         const filename = try std.fmt.allocPrint(allocator, "repository-{s}.json", .{name});
@@ -236,7 +236,7 @@ fn cmdUpdate(allocator: std.mem.Allocator, args: []const []const u8) !void {
     defer arena.deinit();
     const aa = arena.allocator();
 
-    const sources = external.loadRepositories(aa, allocator) catch &.{};
+    const sources = loader.loadRepositories(aa, allocator) catch &.{};
 
     if (sources.len == 0) {
         std.debug.print("No repositories configured.\n", .{});
@@ -251,7 +251,7 @@ fn cmdUpdate(allocator: std.mem.Allocator, args: []const []const u8) !void {
         }
 
         std.debug.print("Updating '{s}'...\n", .{s.name});
-        external.fetchAndCache(allocator, s.name, s.url) catch |e| {
+        loader.fetchAndCache(allocator, s.name, s.url) catch |e| {
             std.debug.print("{s}{s}{s} {s}: fetch failed ({s}) — using cached\n", .{
                 output.RED, output.SYM_FAIL, output.RESET, s.name, @errorName(e),
             });
@@ -262,7 +262,7 @@ fn cmdUpdate(allocator: std.mem.Allocator, args: []const []const u8) !void {
         const tool_count = blk: {
             const filename = std.fmt.allocPrint(allocator, "repository-{s}.json", .{s.name}) catch break :blk 0;
             defer allocator.free(filename);
-            const dir = external.configDir(allocator) catch break :blk 0;
+            const dir = loader.configDir(allocator) catch break :blk 0;
             defer allocator.free(dir);
             const path = std.fs.path.join(allocator, &.{ dir, filename }) catch break :blk 0;
             defer allocator.free(path);
@@ -270,7 +270,7 @@ fn cmdUpdate(allocator: std.mem.Allocator, args: []const []const u8) !void {
             defer file.close();
             const content = file.readToEndAlloc(allocator, 10 * 1024 * 1024) catch break :blk 0;
             defer allocator.free(content);
-            break :blk external.countToolsInJson(allocator, content);
+            break :blk loader.countToolsInJson(allocator, content);
         };
 
         std.debug.print("{s}{s}{s} {s}: {d} tools\n", .{

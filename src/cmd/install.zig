@@ -38,7 +38,7 @@ const HELP =
     \\Usage: dot install <tool> [version] [--force]
     \\       dot install --group <group> [--force]
     \\
-    \\Install a tool from the registry.
+    \\Install a tool from the repository.
     \\
     \\Arguments:
     \\  <tool>         Tool ID to install (e.g. helm, kubectl)
