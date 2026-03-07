@@ -1,49 +1,22 @@
+const std = @import("std");
 const tool = @import("../tool.zig");
 
-const helm = @import("helm.zig");
-const kubectl = @import("kubectl.zig");
-const k9s = @import("k9s.zig");
-const kubelogin = @import("kubelogin.zig");
-const jq = @import("jq.zig");
-const gh = @import("gh.zig");
-const terraform = @import("terraform.zig");
-const vault = @import("vault.zig");
-const btop = @import("btop.zig");
-const podman = @import("podman.zig");
-const aws = @import("aws.zig");
-const gcloud = @import("gcloud.zig");
-const oci_cli = @import("oci_cli.zig");
-const starship = @import("starship.zig");
+// Tool definitions now live in builtin-repository.json (embedded at compile time)
+// and are loaded at runtime via registry/external.zig:loadBuiltinTools().
+// This file is kept for utility functions that operate on a runtime tool slice.
 
-pub const all_tools: []const *const tool.Tool = &.{
-    &helm.def,
-    &kubectl.def,
-    &k9s.def,
-    &kubelogin.def,
-    &jq.def,
-    &gh.def,
-    &terraform.def,
-    &vault.def,
-    &btop.def,
-    &podman.def,
-    &aws.def,
-    &gcloud.def,
-    &oci_cli.def,
-    &starship.def,
-};
-
-pub fn findById(id: []const u8) ?*const tool.Tool {
-    for (all_tools) |t| {
+pub fn findById(tools: []const tool.Tool, id: []const u8) ?tool.Tool {
+    for (tools) |t| {
         if (std.mem.eql(u8, t.id, id)) return t;
     }
     return null;
 }
 
-/// Returns a slice of tools in a given group, written into caller-provided buf.
-/// buf must have length >= all_tools.len.
-pub fn findByGroup(group: tool.Group, buf: []*const tool.Tool, out: *[]const *const tool.Tool) void {
+/// Writes tools in the given group into `buf` and sets `out` to the filled prefix.
+/// `buf` must be at least as long as `tools`.
+pub fn findByGroup(tools: []const tool.Tool, group: tool.Group, buf: []tool.Tool, out: *[]const tool.Tool) void {
     var count: usize = 0;
-    for (all_tools) |t| {
+    for (tools) |t| {
         for (t.groups) |g| {
             if (g == group) {
                 buf[count] = t;
@@ -55,77 +28,50 @@ pub fn findByGroup(group: tool.Group, buf: []*const tool.Tool, out: *[]const *co
     out.* = buf[0..count];
 }
 
-const std = @import("std");
-
-test "registry: all tools have IDs" {
-    for (all_tools) |t| {
-        try std.testing.expect(t.id.len > 0);
-        try std.testing.expect(t.name.len > 0);
-    }
+test "findById: returns null for empty slice" {
+    try std.testing.expect(findById(&.{}, "helm") == null);
 }
 
-test "registry: findById helm" {
-    const t = findById("helm");
+test "findById: finds a tool by id" {
+    const tools = [_]tool.Tool{.{
+        .id = "helm",
+        .name = "Helm",
+        .description = "test",
+        .groups = &.{.k8s},
+        .homepage = "https://helm.sh",
+        .version_source = .{ .static = .{ .version = "3.0.0" } },
+        .strategy = .{ .direct_binary = .{ .url_template = "https://example.com" } },
+    }};
+    const t = findById(&tools, "helm");
     try std.testing.expect(t != null);
     try std.testing.expectEqualStrings("helm", t.?.id);
+    try std.testing.expect(findById(&tools, "notexist") == null);
 }
 
-test "registry: findById unknown returns null" {
-    try std.testing.expect(findById("not-a-real-tool") == null);
-    try std.testing.expect(findById("") == null);
-}
-
-test "registry: findByGroup k8s returns non-empty" {
-    var buf_arr: [all_tools.len]*const tool.Tool = undefined;
-    const buf: []*const tool.Tool = &buf_arr;
-    var results: []const *const tool.Tool = &.{};
-    findByGroup(.k8s, buf, &results);
-    try std.testing.expect(results.len > 0);
-    // All returned tools must include the k8s group
-    for (results) |t| {
-        var found = false;
-        for (t.groups) |g| {
-            if (g == .k8s) {
-                found = true;
-                break;
-            }
-        }
-        try std.testing.expect(found);
-    }
-}
-
-test "registry: findByGroup iac contains terraform and vault" {
-    var buf_arr: [all_tools.len]*const tool.Tool = undefined;
-    const buf: []*const tool.Tool = &buf_arr;
-    var results: []const *const tool.Tool = &.{};
-    findByGroup(.iac, buf, &results);
-    try std.testing.expect(results.len > 0);
-    var has_terraform = false;
-    var has_vault = false;
-    for (results) |t| {
-        if (std.mem.eql(u8, t.id, "terraform")) has_terraform = true;
-        if (std.mem.eql(u8, t.id, "vault")) has_vault = true;
-    }
-    try std.testing.expect(has_terraform);
-    try std.testing.expect(has_vault);
-}
-
-test "registry: all tools have valid IDs (alphanumeric/hyphen/underscore)" {
-    for (all_tools) |t| {
-        for (t.id) |c| {
-            try std.testing.expect(
-                std.ascii.isAlphanumeric(c) or c == '-' or c == '_',
-            );
-        }
-    }
-}
-
-test "registry: all tools have unique IDs" {
-    for (all_tools, 0..) |a, i| {
-        for (all_tools, 0..) |b, j| {
-            if (i != j) {
-                try std.testing.expect(!std.mem.eql(u8, a.id, b.id));
-            }
-        }
-    }
+test "findByGroup: filters correctly" {
+    const tools = [_]tool.Tool{
+        .{
+            .id = "helm",
+            .name = "Helm",
+            .description = "test",
+            .groups = &.{.k8s},
+            .homepage = "https://helm.sh",
+            .version_source = .{ .static = .{ .version = "3.0.0" } },
+            .strategy = .{ .direct_binary = .{ .url_template = "https://example.com" } },
+        },
+        .{
+            .id = "jq",
+            .name = "jq",
+            .description = "test",
+            .groups = &.{.utils},
+            .homepage = "https://jqlang.github.io/jq/",
+            .version_source = .{ .static = .{ .version = "1.7.0" } },
+            .strategy = .{ .direct_binary = .{ .url_template = "https://example.com" } },
+        },
+    };
+    var buf: [2]tool.Tool = undefined;
+    var out: []const tool.Tool = &.{};
+    findByGroup(&tools, .k8s, &buf, &out);
+    try std.testing.expectEqual(@as(usize, 1), out.len);
+    try std.testing.expectEqualStrings("helm", out[0].id);
 }

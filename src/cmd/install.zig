@@ -1,7 +1,6 @@
 const std = @import("std");
 const tool_mod = @import("../tool.zig");
 const state_mod = @import("../state.zig");
-const registry = @import("../registry/mod.zig");
 const platform = @import("../platform.zig");
 const shell_mod = @import("../shell.zig");
 const output = @import("../ui/output.zig");
@@ -68,6 +67,7 @@ pub fn run(
     allocator: std.mem.Allocator,
     args: []const []const u8,
     state: *state_mod.State,
+    tools: []const tool_mod.Tool,
 ) !void {
     if (args.len == 0) {
         output.printRaw(HELP);
@@ -84,7 +84,7 @@ pub fn run(
     const parsed = parseInstallArgs(args);
 
     if (parsed.group_mode) {
-        try installGroup(allocator, parsed.group_name, parsed.force, state);
+        try installGroup(allocator, parsed.group_name, parsed.force, state, tools);
     } else if (parsed.tool_name.len > 0) {
         if (!validate.isValidToolId(parsed.tool_name)) {
             output.printError("invalid tool name");
@@ -96,7 +96,7 @@ pub fn run(
                 return;
             }
         }
-        try installTool(allocator, parsed.tool_name, parsed.version_arg, parsed.force, state);
+        try installTool(allocator, parsed.tool_name, parsed.version_arg, parsed.force, state, tools);
     } else {
         output.printError("no tool or group specified");
     }
@@ -107,31 +107,40 @@ fn installGroup(
     group_name: []const u8,
     force: bool,
     state: *state_mod.State,
+    tools: []const tool_mod.Tool,
 ) !void {
-    const group = parseGroup(group_name) orelse {
+    const is_all = std.mem.eql(u8, group_name, "all");
+    if (!is_all and parseGroup(group_name) == null) {
         printUnknownGroup(group_name);
         return;
-    };
-
-    var buf_arr: [registry.all_tools.len]*const tool_mod.Tool = undefined;
-    const buf: []*const tool_mod.Tool = &buf_arr;
-    var tools: []const *const tool_mod.Tool = &.{};
-
-    if (group_name.len == 3 and std.mem.eql(u8, group_name, "all")) {
-        tools = registry.all_tools;
-    } else {
-        registry.findByGroup(group, buf, &tools);
     }
 
-    if (tools.len == 0) {
+    var group_tools: std.ArrayList(tool_mod.Tool) = .empty;
+    defer group_tools.deinit(allocator);
+
+    if (is_all) {
+        try group_tools.appendSlice(allocator, tools);
+    } else {
+        const group = parseGroup(group_name).?;
+        for (tools) |t| {
+            for (t.groups) |g| {
+                if (g == group) {
+                    try group_tools.append(allocator, t);
+                    break;
+                }
+            }
+        }
+    }
+
+    if (group_tools.items.len == 0) {
         output.printFmt("No tools found in group '{s}'\n", .{group_name});
         return;
     }
 
-    printGroupBanner(group_name, tools.len);
+    printGroupBanner(group_name, group_tools.items.len);
 
-    for (tools) |t| {
-        installTool(allocator, t.id, null, force, state) catch |e| {
+    for (group_tools.items) |t| {
+        installTool(allocator, t.id, null, force, state, tools) catch |e| {
             printGroupToolError(t.id, e);
         };
     }
@@ -143,8 +152,16 @@ fn installTool(
     version_arg: ?[]const u8,
     force: bool,
     state: *state_mod.State,
+    tools: []const tool_mod.Tool,
 ) !void {
-    const t = registry.findById(id) orelse {
+    var found: ?tool_mod.Tool = null;
+    for (tools) |t| {
+        if (std.mem.eql(u8, t.id, id)) {
+            found = t;
+            break;
+        }
+    }
+    const t = found orelse {
         output.printUnknownTool(id);
         return;
     };
@@ -265,14 +282,26 @@ fn installTool(
         // Shell integration (brew handles its own PATH and completions)
         const sh = platform.Shell.detect();
         if (sh != .unknown) {
+            var section: std.ArrayList(u8) = .empty;
+            defer section.deinit(allocator);
+
             if (t.shell_completions) |completions| {
-                if (completions.forShell(sh)) |config| {
-                    shell_mod.ensureSourced(sh, allocator) catch {};
-                    shell_mod.addSection(sh, t.id, config, allocator) catch {};
-                    output.printStep("Shell integration", output.SYM_OK, sh.name());
-                } else {
-                    output.printStep("Shell integration", "-", "no config for this shell");
+                if (completions.forShell(sh)) |comp_cmd| {
+                    try section.appendSlice(allocator, comp_cmd);
                 }
+            }
+
+            for (t.aliases) |alias_name| {
+                if (section.items.len > 0) try section.append(allocator, '\n');
+                const alias_line = try std.fmt.allocPrint(allocator, "alias {s}={s}", .{ alias_name, t.id });
+                defer allocator.free(alias_line);
+                try section.appendSlice(allocator, alias_line);
+            }
+
+            if (section.items.len > 0) {
+                shell_mod.ensureSourced(sh, allocator) catch {};
+                shell_mod.addSection(sh, t.id, section.items, allocator) catch {};
+                output.printStep("Shell integration", output.SYM_OK, sh.name());
             }
         }
     }

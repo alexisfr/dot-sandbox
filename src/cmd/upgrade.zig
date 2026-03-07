@@ -1,7 +1,6 @@
 const std = @import("std");
 const tool_mod = @import("../tool.zig");
 const state_mod = @import("../state.zig");
-const registry = @import("../registry/mod.zig");
 const install_cmd = @import("install.zig");
 const output = @import("../ui/output.zig");
 
@@ -55,6 +54,7 @@ pub fn run(
     allocator: std.mem.Allocator,
     args: []const []const u8,
     state: *state_mod.State,
+    tools: []const tool_mod.Tool,
 ) !void {
     for (args) |a| {
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
@@ -70,19 +70,25 @@ pub fn run(
     if (target) |name| {
         // Group upgrade: only upgrade tools in the group that are already installed
         if (install_cmd.parseGroup(name)) |group| {
-            var buf_arr: [registry.all_tools.len]*const tool_mod.Tool = undefined;
-            const buf: []*const tool_mod.Tool = &buf_arr;
-            var group_tools: []const *const tool_mod.Tool = &.{};
-            registry.findByGroup(group, buf, &group_tools);
+            var group_tools: std.ArrayList(tool_mod.Tool) = .empty;
+            defer group_tools.deinit(allocator);
+            for (tools) |t| {
+                for (t.groups) |g| {
+                    if (g == group) {
+                        try group_tools.append(allocator, t);
+                        break;
+                    }
+                }
+            }
 
-            for (group_tools) |t| {
+            for (group_tools.items) |t| {
                 if (!state.isInstalled(t.id)) continue;
                 if (force) {
-                    install_cmd.run(allocator, &.{ t.id, "--force" }, state) catch |e| {
+                    install_cmd.run(allocator, &.{ t.id, "--force" }, state, tools) catch |e| {
                         output.printFmt("Failed to upgrade {s}: {s}\n", .{ t.id, @errorName(e) });
                     };
                 } else {
-                    install_cmd.run(allocator, &.{t.id}, state) catch |e| {
+                    install_cmd.run(allocator, &.{t.id}, state, tools) catch |e| {
                         output.printFmt("Failed to upgrade {s}: {s}\n", .{ t.id, @errorName(e) });
                     };
                 }
@@ -91,14 +97,18 @@ pub fn run(
         }
 
         // Single tool upgrade: dot upgrade helm
-        if (registry.findById(name) == null) {
+        var found = false;
+        for (tools) |t| {
+            if (std.mem.eql(u8, t.id, name)) { found = true; break; }
+        }
+        if (!found) {
             output.printUnknownTool(name);
             return;
         }
         if (force) {
-            try install_cmd.run(allocator, &.{ name, "--force" }, state);
+            try install_cmd.run(allocator, &.{ name, "--force" }, state, tools);
         } else {
-            try install_cmd.run(allocator, &.{name}, state);
+            try install_cmd.run(allocator, &.{name}, state, tools);
         }
     } else {
         // Upgrade all installed tools
@@ -113,11 +123,11 @@ pub fn run(
 
         for (to_upgrade.items) |id| {
             if (force) {
-                install_cmd.run(allocator, &.{ id, "--force" }, state) catch |e| {
+                install_cmd.run(allocator, &.{ id, "--force" }, state, tools) catch |e| {
                     output.printFmt("Failed to upgrade {s}: {s}\n", .{ id, @errorName(e) });
                 };
             } else {
-                install_cmd.run(allocator, &.{id}, state) catch |e| {
+                install_cmd.run(allocator, &.{id}, state, tools) catch |e| {
                     output.printFmt("Failed to upgrade {s}: {s}\n", .{ id, @errorName(e) });
                 };
             }
@@ -180,10 +190,27 @@ test "parseUpgradeArgs: unknown target is not a group" {
 
 test "group upgrade only touches installed tools" {
     // Build a k8s group tool list and verify that a tool NOT in state would be skipped.
-    var buf_arr: [registry.all_tools.len]*const tool_mod.Tool = undefined;
-    const buf: []*const tool_mod.Tool = &buf_arr;
-    var group_tools: []const *const tool_mod.Tool = &.{};
-    registry.findByGroup(.k8s, buf, &group_tools);
+    const k8s_tools = [_]tool_mod.Tool{
+        .{
+            .id = "kubectl",
+            .name = "kubectl",
+            .description = "test",
+            .groups = &.{.k8s},
+            .homepage = "https://kubernetes.io",
+            .version_source = .{ .static = .{ .version = "1.30.0" } },
+            .strategy = .{ .direct_binary = .{ .url_template = "https://example.com" } },
+        },
+        .{
+            .id = "helm",
+            .name = "Helm",
+            .description = "test",
+            .groups = &.{.k8s},
+            .homepage = "https://helm.sh",
+            .version_source = .{ .static = .{ .version = "3.0.0" } },
+            .strategy = .{ .direct_binary = .{ .url_template = "https://example.com" } },
+        },
+    };
+    const group_tools: []const tool_mod.Tool = &k8s_tools;
     try std.testing.expect(group_tools.len > 0);
 
     // Simulate an empty state — none of the k8s tools are installed.

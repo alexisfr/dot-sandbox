@@ -7,8 +7,11 @@ const doctor_cmd = @import("cmd/doctor.zig");
 const upgrade_cmd = @import("cmd/upgrade.zig");
 const uninstall_cmd = @import("cmd/uninstall.zig");
 const plugin_cmd = @import("cmd/plugin.zig");
+const repository_cmd = @import("cmd/repository.zig");
 const output = @import("ui/output.zig");
 const validate = @import("validate.zig");
+const registry_ext = @import("registry/external.zig");
+const tool_mod = @import("tool.zig");
 
 const VERSION = "dot version 0.1.0\n";
 
@@ -30,6 +33,7 @@ const HELP =
     \\  upgrade --force             Force upgrade, including pinned tools
     \\  doctor                      Check system health
     \\  plugin <subcommand>         Manage plugins
+    \\  repository <subcommand>      Manage external repositories
     \\
     \\Groups:  k8s, cloud, iac, containers, utils, terminal, all
     \\
@@ -38,6 +42,12 @@ const HELP =
     \\  plugin install <url>
     \\  plugin uninstall <name>
     \\  plugin update [name]
+    \\
+    \\Repository subcommands:
+    \\  repository add <url>
+    \\  repository list
+    \\  repository remove <name>
+    \\  repository update [name]
     \\
     \\Options:
     \\  --version, -v         Show version
@@ -73,10 +83,11 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
     }
     const args = rest.items;
 
-    if (std.mem.eql(u8, command, "list")) {
+    // Commands that don't need the tool registry
+    if (std.mem.eql(u8, command, "status")) {
         var state = try state_mod.State.init(allocator);
         defer state.deinit();
-        return list_cmd.run(allocator, args, &state);
+        return status_cmd.run(allocator, args, &state);
     }
 
     if (std.mem.eql(u8, command, "doctor")) {
@@ -85,34 +96,50 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
         return doctor_cmd.run(allocator, args, &state);
     }
 
+    if (std.mem.eql(u8, command, "plugin")) {
+        var state = try state_mod.State.init(allocator);
+        defer state.deinit();
+        return plugin_cmd.run(allocator, args, &state);
+    }
+
+    if (std.mem.eql(u8, command, "repository")) {
+        var state = try state_mod.State.init(allocator);
+        defer state.deinit();
+        return repository_cmd.run(allocator, args, &state);
+    }
+
+    // Commands that need the merged tool list (builtins + external)
+    var builtin = try registry_ext.loadBuiltinTools(allocator);
+    defer builtin.deinit();
+
+    var external = try registry_ext.loadExternalTools(allocator);
+    defer external.deinit();
+
+    const tools = try mergeTools(allocator, builtin.tools, external.tools);
+    defer allocator.free(tools);
+
+    if (std.mem.eql(u8, command, "list")) {
+        var state = try state_mod.State.init(allocator);
+        defer state.deinit();
+        return list_cmd.run(allocator, args, &state, tools);
+    }
+
     if (std.mem.eql(u8, command, "install")) {
         var state = try state_mod.State.init(allocator);
         defer state.deinit();
-        return install_cmd.run(allocator, args, &state);
-    }
-
-    if (std.mem.eql(u8, command, "status")) {
-        var state = try state_mod.State.init(allocator);
-        defer state.deinit();
-        return status_cmd.run(allocator, args, &state);
+        return install_cmd.run(allocator, args, &state, tools);
     }
 
     if (std.mem.eql(u8, command, "upgrade")) {
         var state = try state_mod.State.init(allocator);
         defer state.deinit();
-        return upgrade_cmd.run(allocator, args, &state);
+        return upgrade_cmd.run(allocator, args, &state, tools);
     }
 
     if (std.mem.eql(u8, command, "uninstall") or std.mem.eql(u8, command, "remove")) {
         var state = try state_mod.State.init(allocator);
         defer state.deinit();
-        return uninstall_cmd.run(allocator, args, &state);
-    }
-
-    if (std.mem.eql(u8, command, "plugin")) {
-        var state = try state_mod.State.init(allocator);
-        defer state.deinit();
-        return plugin_cmd.run(allocator, args, &state);
+        return uninstall_cmd.run(allocator, args, &state, tools);
     }
 
     // Plugin dispatch: dot <cmd> → try dot-<cmd> in PATH
@@ -122,7 +149,7 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
     }
 
     // Suggest the closest known command if the edit distance is small enough.
-    const known = [_][]const u8{ "list", "install", "uninstall", "status", "upgrade", "doctor", "plugin" };
+    const known = [_][]const u8{ "list", "install", "uninstall", "status", "upgrade", "doctor", "plugin", "repository" };
     var best_dist: usize = std.math.maxInt(usize);
     var best_cmd: []const u8 = "";
     for (known) |k| {
@@ -137,6 +164,29 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
     } else {
         output.printFmt("Unknown command: {s}\nRun 'dot --help' for usage.\n", .{command});
     }
+}
+
+/// Merge builtin tools with external tools. External tools override builtins with the same ID.
+/// Caller owns the returned slice.
+fn mergeTools(allocator: std.mem.Allocator, builtins: []const tool_mod.Tool, externals: []const tool_mod.Tool) ![]tool_mod.Tool {
+    var list: std.ArrayList(tool_mod.Tool) = .empty;
+    defer list.deinit(allocator);
+
+    try list.appendSlice(allocator, builtins);
+
+    for (externals) |ext| {
+        var replaced = false;
+        for (list.items, 0..) |item, i| {
+            if (std.mem.eql(u8, item.id, ext.id)) {
+                list.items[i] = ext;
+                replaced = true;
+                break;
+            }
+        }
+        if (!replaced) try list.append(allocator, ext);
+    }
+
+    return list.toOwnedSlice(allocator);
 }
 
 /// Simple iterative Levenshtein distance, capped at 256-char inputs.
@@ -234,4 +284,65 @@ test "editDistance: empty strings" {
 
 test "editDistance: completely different" {
     try std.testing.expect(editDistance("xyz", "list") > 3);
+}
+
+test "mergeTools: external overrides builtin with same ID" {
+    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    defer _ = gpa.deinit();
+    const alloc = gpa.allocator();
+
+    const builtin_tools = [_]tool_mod.Tool{
+        .{
+            .id = "helm",
+            .name = "Helm",
+            .description = "builtin",
+            .groups = &.{.k8s},
+            .homepage = "https://helm.sh",
+            .version_source = .{ .static = .{ .version = "3.0.0" } },
+            .strategy = .{ .direct_binary = .{ .url_template = "https://example.com" } },
+        },
+        .{
+            .id = "kubectl",
+            .name = "Kubectl",
+            .description = "builtin",
+            .groups = &.{.k8s},
+            .homepage = "https://k8s.io",
+            .version_source = .{ .static = .{ .version = "1.0.0" } },
+            .strategy = .{ .direct_binary = .{ .url_template = "https://example.com" } },
+        },
+    };
+
+    const ext_tools = [_]tool_mod.Tool{
+        .{
+            .id = "helm",
+            .name = "Helm (external)",
+            .description = "external override",
+            .groups = &.{.k8s},
+            .homepage = "https://helm.sh",
+            .version_source = .{ .static = .{ .version = "4.0.0" } },
+            .strategy = .{ .direct_binary = .{ .url_template = "https://example.com" } },
+        },
+        .{
+            .id = "mytool",
+            .name = "MyTool",
+            .description = "external only",
+            .groups = &.{.utils},
+            .homepage = "https://example.com",
+            .version_source = .{ .static = .{ .version = "1.0.0" } },
+            .strategy = .{ .direct_binary = .{ .url_template = "https://example.com" } },
+        },
+    };
+
+    const merged = try mergeTools(alloc, &builtin_tools, &ext_tools);
+    defer alloc.free(merged);
+
+    // Should have 3 tools: helm (overridden), kubectl, mytool
+    try std.testing.expectEqual(@as(usize, 3), merged.len);
+
+    // Find helm — should be the external version
+    for (merged) |t| {
+        if (std.mem.eql(u8, t.id, "helm")) {
+            try std.testing.expectEqualStrings("external override", t.description);
+        }
+    }
 }

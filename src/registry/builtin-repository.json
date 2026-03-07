@@ -1,0 +1,285 @@
+{
+  "name": "the-devops-hub",
+  "description": "Default DevOps toolbox repository",
+  "tools": [
+    {
+      "id": "helm",
+      "name": "Helm",
+      "description": "The Kubernetes Package Manager",
+      "groups": ["k8s"],
+      "homepage": "https://helm.sh",
+      "brew_formula": "helm",
+      "aliases": ["h"],
+      "version_source": {
+        "type": "github_release",
+        "repo": "helm/helm",
+        "filter": "v3."
+      },
+      "strategy": {
+        "type": "github_release",
+        "url_template": "https://get.helm.sh/helm-v{version}-{os}-{arch}.tar.gz",
+        "binary_in_archive": "{os}-{arch}/helm",
+        "checksum_url_template": "https://get.helm.sh/helm-v{version}-{os}-{arch}.tar.gz.sha256sum"
+      },
+      "shell_completions": {
+        "bash_cmd": "source <(helm completion bash)",
+        "zsh_cmd": "source <(helm completion zsh)",
+        "fish_cmd": "helm completion fish | source"
+      }
+    },
+    {
+      "id": "kubectl",
+      "name": "kubectl",
+      "description": "The Kubernetes command-line tool",
+      "groups": ["k8s"],
+      "homepage": "https://kubernetes.io/docs/reference/kubectl/",
+      "brew_formula": "kubernetes-cli",
+      "aliases": ["k"],
+      "version_source": {
+        "type": "k8s_stable_txt"
+      },
+      "strategy": {
+        "type": "direct_binary",
+        "url_template": "https://dl.k8s.io/release/v{version}/bin/{os}/{arch}/kubectl"
+      },
+      "shell_completions": {
+        "bash_cmd": "source <(kubectl completion bash)",
+        "zsh_cmd": "source <(kubectl completion zsh)",
+        "fish_cmd": "kubectl completion fish | source"
+      }
+    },
+    {
+      "id": "k9s",
+      "name": "k9s",
+      "description": "Terminal UI to interact with Kubernetes clusters",
+      "groups": ["k8s"],
+      "homepage": "https://k9scli.io",
+      "brew_formula": "k9s",
+      "version_source": {
+        "type": "github_release",
+        "repo": "derailed/k9s"
+      },
+      "strategy": {
+        "type": "github_release",
+        "url_template": "https://github.com/derailed/k9s/releases/download/v{version}/k9s_{os}_{arch}.tar.gz",
+        "binary_in_archive": "k9s"
+      }
+    },
+    {
+      "id": "kubelogin",
+      "name": "kubelogin",
+      "description": "Kubernetes credential plugin for Azure/AAD authentication",
+      "groups": ["k8s"],
+      "homepage": "https://github.com/Azure/kubelogin",
+      "brew_formula": "int128/kubelogin/kubelogin",
+      "version_source": {
+        "type": "github_release",
+        "repo": "Azure/kubelogin"
+      },
+      "strategy": {
+        "type": "github_release",
+        "url_template": "https://github.com/Azure/kubelogin/releases/download/v{version}/kubelogin-{os}-{arch}.zip",
+        "binary_in_archive": "bin/{os}_{arch}/kubelogin"
+      }
+    },
+    {
+      "id": "terraform",
+      "name": "Terraform",
+      "description": "Infrastructure as Code tool by HashiCorp",
+      "groups": ["iac"],
+      "homepage": "https://www.terraform.io",
+      "brew_formula": "hashicorp/tap/terraform",
+      "aliases": ["tf"],
+      "version_source": {
+        "type": "hashicorp",
+        "product": "terraform"
+      },
+      "strategy": {
+        "type": "hashicorp_release",
+        "product": "terraform"
+      },
+      "shell_completions": {
+        "bash_cmd": "complete -C terraform terraform",
+        "zsh_cmd": "complete -C terraform terraform",
+        "fish_cmd": null
+      }
+    },
+    {
+      "id": "vault",
+      "name": "Vault",
+      "description": "Secrets management tool by HashiCorp",
+      "groups": ["iac"],
+      "homepage": "https://www.vaultproject.io",
+      "brew_formula": "hashicorp/tap/vault",
+      "version_source": {
+        "type": "hashicorp",
+        "product": "vault"
+      },
+      "strategy": {
+        "type": "hashicorp_release",
+        "product": "vault"
+      },
+      "shell_completions": {
+        "bash_cmd": "complete -C vault vault",
+        "zsh_cmd": "complete -C vault vault",
+        "fish_cmd": null
+      }
+    },
+    {
+      "id": "jq",
+      "name": "jq",
+      "description": "Lightweight and flexible command-line JSON processor",
+      "groups": ["utils"],
+      "homepage": "https://jqlang.github.io/jq/",
+      "brew_formula": "jq",
+      "version_source": {
+        "type": "github_release",
+        "repo": "jqlang/jq",
+        "strip_prefix": "jq-"
+      },
+      "strategy": {
+        "type": "direct_binary",
+        "url_template": "https://github.com/jqlang/jq/releases/download/jq-{version}/jq-{os}-{arch}"
+      }
+    },
+    {
+      "id": "gh",
+      "name": "GitHub CLI",
+      "description": "GitHub's official command line tool",
+      "groups": ["utils"],
+      "homepage": "https://cli.github.com",
+      "brew_formula": "gh",
+      "version_source": {
+        "type": "github_release",
+        "repo": "cli/cli"
+      },
+      "strategy": {
+        "type": "github_release",
+        "url_template": "https://github.com/cli/cli/releases/download/v{version}/gh_{version}_{os}_{arch}.tar.gz",
+        "binary_in_archive": "gh_{version}_{os}_{arch}/bin/gh"
+      },
+      "shell_completions": {
+        "bash_cmd": "source <(gh completion -s bash)",
+        "zsh_cmd": "source <(gh completion -s zsh)",
+        "fish_cmd": "gh completion -s fish | source"
+      }
+    },
+    {
+      "id": "btop",
+      "name": "btop",
+      "description": "Resource monitor that shows usage and stats for CPU, memory, disk and network",
+      "groups": ["utils"],
+      "homepage": "https://github.com/aristocratos/btop",
+      "version_source": {
+        "type": "github_release",
+        "repo": "aristocratos/btop"
+      },
+      "strategy": {
+        "type": "system_package",
+        "pacman": "btop",
+        "apt": "btop",
+        "dnf": "btop",
+        "brew": "btop",
+        "flatpak": "com.github.aristocratos.btop"
+      }
+    },
+    {
+      "id": "podman",
+      "name": "Podman",
+      "description": "Daemonless container engine for OCI containers",
+      "groups": ["containers"],
+      "homepage": "https://podman.io",
+      "version_source": {
+        "type": "github_release",
+        "repo": "containers/podman"
+      },
+      "strategy": {
+        "type": "system_package",
+        "pacman": "podman",
+        "apt": "podman",
+        "dnf": "podman",
+        "brew": "podman"
+      }
+    },
+    {
+      "id": "aws",
+      "name": "AWS CLI",
+      "description": "Unified command line interface for Amazon Web Services",
+      "groups": ["cloud"],
+      "homepage": "https://aws.amazon.com/cli/",
+      "brew_formula": "awscli",
+      "version_source": {
+        "type": "github_release",
+        "repo": "aws/aws-cli"
+      },
+      "strategy": {
+        "type": "tarball",
+        "url_template": "https://awscli.amazonaws.com/awscli-exe-{os}-{arch}.zip",
+        "strip_components": 0,
+        "install_script": "aws/install"
+      }
+    },
+    {
+      "id": "gcloud",
+      "name": "Google Cloud SDK",
+      "description": "Command line tools for Google Cloud Platform",
+      "groups": ["cloud"],
+      "homepage": "https://cloud.google.com/sdk",
+      "version_source": {
+        "type": "static",
+        "version": "latest"
+      },
+      "strategy": {
+        "type": "tarball",
+        "url_template": "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-{os}-{arch}.tar.gz",
+        "strip_components": 1,
+        "install_script": "install.sh"
+      },
+      "shell_completions": {
+        "bash_cmd": "source ~/.local/bin/google-cloud-sdk/completion.bash.inc",
+        "zsh_cmd": "source ~/.local/bin/google-cloud-sdk/completion.zsh.inc",
+        "fish_cmd": null
+      }
+    },
+    {
+      "id": "oci",
+      "name": "OCI CLI",
+      "description": "Command line interface for Oracle Cloud Infrastructure",
+      "groups": ["cloud"],
+      "homepage": "https://docs.oracle.com/en-us/iaas/tools/oci-cli/latest/",
+      "brew_formula": "oci-cli",
+      "version_source": {
+        "type": "pypi",
+        "package": "oci-cli"
+      },
+      "strategy": {
+        "type": "pip_venv",
+        "package": "oci-cli",
+        "install_dir_rel": "~/.local/opt/oci-cli",
+        "binary_name": "oci"
+      }
+    },
+    {
+      "id": "starship",
+      "name": "Starship",
+      "description": "The minimal, blazing-fast, and infinitely customizable prompt for any shell",
+      "groups": ["terminal"],
+      "homepage": "https://starship.rs",
+      "brew_formula": "starship",
+      "version_source": {
+        "type": "github_release",
+        "repo": "starship/starship"
+      },
+      "strategy": {
+        "type": "github_release",
+        "url_template": "https://github.com/starship/starship/releases/download/v{version}/starship-{arch}-unknown-{os}-musl.tar.gz",
+        "binary_in_archive": "starship"
+      },
+      "shell_completions": {
+        "bash_cmd": "eval \"$(starship init bash)\"",
+        "zsh_cmd": "eval \"$(starship init zsh)\"",
+        "fish_cmd": "starship init fish | source"
+      }
+    }
+  ]
+}

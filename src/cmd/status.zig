@@ -41,6 +41,32 @@ fn printStatusFooter(count: usize) void {
     std.debug.print("\n{d} tool(s) installed\n\n", .{count});
 }
 
+fn formatTimestamp(ts_str: []const u8, buf: []u8) []const u8 {
+    const secs = std.fmt.parseInt(u64, ts_str, 10) catch return ts_str;
+    const epoch_secs = std.time.epoch.EpochSeconds{ .secs = secs };
+    const year_day = epoch_secs.getEpochDay().calculateYearDay();
+    const month_day = year_day.calculateMonthDay();
+    const day_secs = secs % (24 * 3600);
+    const h = day_secs / 3600;
+    const m = (day_secs % 3600) / 60;
+    const s = day_secs % 60;
+    return std.fmt.bufPrint(buf, "{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}", .{
+        year_day.year,
+        month_day.month.numeric(),
+        month_day.day_index + 1,
+        h, m, s,
+    }) catch ts_str;
+}
+
+test "formatTimestamp" {
+    var buf: [24]u8 = undefined;
+    try std.testing.expectEqualStrings("1970-01-01 00:00:00", formatTimestamp("0", &buf));
+    try std.testing.expectEqualStrings("1970-01-02 00:00:00", formatTimestamp("86400", &buf));
+    try std.testing.expectEqualStrings("1970-01-01 01:01:01", formatTimestamp("3661", &buf));
+    // invalid input → returned as-is
+    try std.testing.expectEqualStrings("bad", formatTimestamp("bad", &buf));
+}
+
 pub fn run(
     allocator: std.mem.Allocator,
     args: []const []const u8,
@@ -62,10 +88,26 @@ pub fn run(
         return;
     }
 
-    var it = state.tools.iterator();
-    while (it.next()) |kv| {
-        const t = kv.value_ptr.*;
-        printStatusRow(kv.key_ptr.*, t.version, t.installed_at, t.method);
+    // Collect keys and sort alphabetically
+    var keys: [256][]const u8 = undefined;
+    var n: usize = 0;
+    var kit = state.tools.iterator();
+    while (kit.next()) |kv| {
+        keys[n] = kv.key_ptr.*;
+        n += 1;
+    }
+    const Cmp = struct {
+        fn lt(_: void, a: []const u8, b: []const u8) bool {
+            return std.mem.lessThan(u8, a, b);
+        }
+    };
+    std.mem.sort([]const u8, keys[0..n], {}, Cmp.lt);
+
+    for (keys[0..n]) |k| {
+        const t = state.tools.get(k).?;
+        var date_buf: [24]u8 = undefined;
+        const date = formatTimestamp(t.installed_at, &date_buf);
+        printStatusRow(k, t.version, date, t.method);
     }
 
     printStatusFooter(state.tools.count());

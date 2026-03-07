@@ -1,11 +1,17 @@
 const std = @import("std");
 const tool_mod = @import("../tool.zig");
 const state_mod = @import("../state.zig");
-const registry = @import("../registry/mod.zig");
 const platform = @import("../platform.zig");
 const shell_mod = @import("../shell.zig");
 const output = @import("../ui/output.zig");
 const validate = @import("../validate.zig");
+
+fn findInTools(id: []const u8, tools: []const tool_mod.Tool) bool {
+    for (tools) |t| {
+        if (std.mem.eql(u8, t.id, id)) return true;
+    }
+    return false;
+}
 
 const HELP =
     \\Usage: dot uninstall <tool>
@@ -37,6 +43,7 @@ pub fn run(
     allocator: std.mem.Allocator,
     args: []const []const u8,
     state: *state_mod.State,
+    tools: []const tool_mod.Tool,
 ) !void {
     if (args.len == 0) {
         output.printRaw(HELP);
@@ -57,7 +64,7 @@ pub fn run(
         return;
     }
 
-    if (registry.findById(id) == null) {
+    if (!findInTools(id, tools)) {
         output.printUnknownTool(id);
         return;
     }
@@ -100,10 +107,17 @@ fn printToolUninstalled(id: []const u8) void {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 test "uninstall: unknown tool is rejected before state check" {
-    // registry.findById("not-a-tool") == null, so run() returns early.
-    // We verify this by checking the registry lookup directly.
-    try std.testing.expect(registry.findById("not-a-tool") == null);
-    try std.testing.expect(registry.findById("helm") != null);
+    const tools = [_]tool_mod.Tool{.{
+        .id = "helm",
+        .name = "Helm",
+        .description = "test",
+        .groups = &.{.k8s},
+        .homepage = "https://helm.sh",
+        .version_source = .{ .static = .{ .version = "3.0.0" } },
+        .strategy = .{ .direct_binary = .{ .url_template = "https://example.com" } },
+    }};
+    try std.testing.expect(!findInTools("not-a-tool", &tools));
+    try std.testing.expect(findInTools("helm", &tools));
 }
 
 test "uninstall: not-installed tool is a no-op on state" {

@@ -67,6 +67,8 @@ pub fn run(
     var warn: usize = 0;
     var fail: usize = 0;
 
+    const home = std.posix.getenv("HOME") orelse "/tmp";
+
     // Platform
     const os = platform.Os.current();
     const arch = platform.Arch.current();
@@ -85,20 +87,40 @@ pub fn run(
         printCheckWarn("Package Manager", "none detected"); warn += 1;
     }
 
-    // Installed tools: verify binaries exist in ~/.local/bin
+    // ~/.local/bin in PATH
+    const path_env = std.posix.getenv("PATH") orelse "";
+    const local_bin_abs = std.fs.path.join(allocator, &.{ home, ".local", "bin" }) catch null;
+    if (local_bin_abs) |lb| {
+        defer allocator.free(lb);
+        if (std.mem.indexOf(u8, path_env, lb) != null) {
+            printCheckPass("~/.local/bin in PATH", "yes"); pass += 1;
+        } else {
+            printCheckWarn("~/.local/bin in PATH", "not found — tools may not be accessible"); warn += 1;
+        }
+    }
+
+    // Installed tools: verify binaries via PATH using `which`
     printDoctorSection("Installed Tools");
 
-    const home = std.posix.getenv("HOME") orelse "/tmp";
     var it = state.tools.iterator();
     while (it.next()) |kv| {
         const id = kv.key_ptr.*;
-        const bin_path = std.fs.path.join(allocator, &.{ home, ".local", "bin", id }) catch continue;
-        defer allocator.free(bin_path);
-
-        if (std.fs.cwd().access(bin_path, .{})) |_| {
+        const result = std.process.Child.run(.{
+            .allocator = allocator,
+            .argv = &.{ "which", id },
+            .max_output_bytes = 512,
+        }) catch {
+            printCheckFail(id, "not found in PATH");
+            fail += 1;
+            continue;
+        };
+        defer allocator.free(result.stdout);
+        defer allocator.free(result.stderr);
+        if (result.term == .Exited and result.term.Exited == 0) {
+            const bin_path = std.mem.trimRight(u8, result.stdout, "\n");
             printCheckPass(id, bin_path); pass += 1;
-        } else |_| {
-            printCheckFail(id, "binary missing from ~/.local/bin"); fail += 1;
+        } else {
+            printCheckWarn(id, "installed but not in PATH"); warn += 1;
         }
     }
 

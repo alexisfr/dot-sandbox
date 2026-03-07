@@ -501,6 +501,8 @@ pub const Tool = struct {
     /// e.g. "hashicorp/tap/terraform".
     brew_formula: ?[]const u8 = null,
     shell_completions: ?ShellCompletions = null,
+    /// Short shell aliases written to the integration file, e.g. "k" → alias k=kubectl
+    aliases: []const []const u8 = &.{},
     post_install: ?PostInstall = null,
     quick_start: []const []const u8 = &.{},
     resources: []const Resource = &.{},
