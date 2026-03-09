@@ -11,7 +11,6 @@ const HELP =
     \\  • Detected shell and package manager
     \\  • Installed tool binaries and their locations
     \\  • Shell integration file status
-    \\  • Plugin directory status
     \\
     \\Options:
     \\  --help, -h    Show this help
@@ -136,19 +135,6 @@ pub fn run(
             printCheckPass("Integration file", p); pass += 1;
         } else |_| {
             printCheckWarn("Integration file", "not found (run a tool install to create it)"); warn += 1;
-        }
-    }
-
-    // Plugin directory
-    const plugin_dir = std.fs.path.join(allocator, &.{
-        home, ".local", "share", "dot", "plugins",
-    }) catch null;
-    if (plugin_dir) |p| {
-        defer allocator.free(p);
-        if (std.fs.cwd().access(p, .{})) |_| {
-            printCheckPass("Plugin dir", p); pass += 1;
-        } else |_| {
-            printCheckWarn("Plugin dir", "not found (created on first plugin install)"); warn += 1;
         }
     }
 

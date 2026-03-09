@@ -335,6 +335,26 @@ fn parseTool(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.Tool {
         break :blk try list.toOwnedSlice(arena);
     } else &.{};
 
+    const post_install: []const []const u8 = if (obj.get("post_install")) |piv| blk: {
+        if (piv != .array) break :blk &.{};
+        var list: std.ArrayList([]const u8) = .empty;
+        for (piv.array.items) |item| {
+            if (item != .string) continue;
+            try list.append(arena, try arena.dupe(u8, item.string));
+        }
+        break :blk try list.toOwnedSlice(arena);
+    } else &.{};
+
+    const post_upgrade: []const []const u8 = if (obj.get("post_upgrade")) |piv| blk: {
+        if (piv != .array) break :blk &.{};
+        var list: std.ArrayList([]const u8) = .empty;
+        for (piv.array.items) |item| {
+            if (item != .string) continue;
+            try list.append(arena, try arena.dupe(u8, item.string));
+        }
+        break :blk try list.toOwnedSlice(arena);
+    } else &.{};
+
     return tool.Tool{
         .id = try arena.dupe(u8, id_val.string),
         .name = try arena.dupe(u8, name_val.string),
@@ -346,6 +366,8 @@ fn parseTool(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.Tool {
         .strategy = strat,
         .shell_completions = shell_completions,
         .aliases = aliases,
+        .post_install = post_install,
+        .post_upgrade = post_upgrade,
     };
 }
 

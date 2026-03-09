@@ -6,14 +6,13 @@ const status_cmd = @import("cmd/status.zig");
 const doctor_cmd = @import("cmd/doctor.zig");
 const upgrade_cmd = @import("cmd/upgrade.zig");
 const uninstall_cmd = @import("cmd/uninstall.zig");
-const plugin_cmd = @import("cmd/plugin.zig");
 const repository_cmd = @import("cmd/repository.zig");
 const output = @import("ui/output.zig");
-const validate = @import("validate.zig");
 const repo = @import("repository/loader.zig");
 const tool_mod = @import("tool.zig");
 
-const VERSION = "dot version 0.1.0\n";
+const version = @import("version.zig");
+const VERSION = "dot version " ++ version.CURRENT ++ "\n";
 
 const HELP =
     \\
@@ -32,16 +31,9 @@ const HELP =
     \\  upgrade [tool|group]        Upgrade installed tools (skips pinned)
     \\  upgrade --force             Force upgrade, including pinned tools
     \\  doctor                      Check system health
-    \\  plugin <subcommand>         Manage plugins
     \\  repository <subcommand>      Manage external repositories
     \\
     \\Groups:  k8s, cloud, iac, containers, utils, terminal, all
-    \\
-    \\Plugin subcommands:
-    \\  plugin list
-    \\  plugin install <url>
-    \\  plugin uninstall <name>
-    \\  plugin update [name]
     \\
     \\Repository subcommands:
     \\  repository add <url>
@@ -96,12 +88,6 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
         return doctor_cmd.run(allocator, args, &state);
     }
 
-    if (std.mem.eql(u8, command, "plugin")) {
-        var state = try state_mod.State.init(allocator);
-        defer state.deinit();
-        return plugin_cmd.run(allocator, args, &state);
-    }
-
     if (std.mem.eql(u8, command, "repository")) {
         var state = try state_mod.State.init(allocator);
         defer state.deinit();
@@ -142,14 +128,8 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
         return uninstall_cmd.run(allocator, args, &state, tools);
     }
 
-    // Plugin dispatch: dot <cmd> → try dot-<cmd> in PATH
-    // Validate command name before use to prevent shell injection via plugin_exe construction.
-    if (validate.isValidCommandName(command) and tryPluginDispatch(allocator, command, args)) {
-        return;
-    }
-
     // Suggest the closest known command if the edit distance is small enough.
-    const known = [_][]const u8{ "list", "install", "uninstall", "status", "upgrade", "doctor", "plugin", "repository" };
+    const known = [_][]const u8{ "list", "install", "uninstall", "status", "upgrade", "doctor", "repository" };
     var best_dist: usize = std.math.maxInt(usize);
     var best_cmd: []const u8 = "";
     for (known) |k| {
@@ -218,39 +198,6 @@ fn editDistance(a: []const u8, b: []const u8) usize {
     }
 
     return prev[blen];
-}
-
-/// Try to dispatch to an external dot-<cmd> plugin executable.
-/// Returns true if the plugin was found and execed.
-fn tryPluginDispatch(allocator: std.mem.Allocator, cmd: []const u8, args: []const []const u8) bool {
-    const plugin_exe = std.fmt.allocPrint(allocator, "dot-{s}", .{cmd}) catch return false;
-    defer allocator.free(plugin_exe);
-
-    const check_cmd = std.fmt.allocPrint(allocator, "command -v {s}", .{plugin_exe}) catch return false;
-    defer allocator.free(check_cmd);
-
-    const check = std.process.Child.run(.{
-        .allocator = allocator,
-        .argv = &.{ "sh", "-c", check_cmd },
-    }) catch return false;
-    defer allocator.free(check.stdout);
-    defer allocator.free(check.stderr);
-
-    if (check.term.Exited != 0) return false;
-
-    var plugin_argv: std.ArrayList([]const u8) = .empty;
-    defer plugin_argv.deinit(allocator);
-
-    plugin_argv.append(allocator, plugin_exe) catch return false;
-    for (args) |a| plugin_argv.append(allocator, a) catch return false;
-
-    var child = std.process.Child.init(plugin_argv.items, allocator);
-    child.stdin_behavior = .Inherit;
-    child.stdout_behavior = .Inherit;
-    child.stderr_behavior = .Inherit;
-    child.spawn() catch return false;
-    _ = child.wait() catch {};
-    return true;
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

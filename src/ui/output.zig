@@ -25,7 +25,6 @@ pub const SYM_LIST = "📋";
 pub const SYM_BOOKS = "📚";
 pub const SYM_LINK = "🔗";
 pub const SYM_SEARCH = "🔍";
-pub const SYM_PLUG = "🔌";
 pub const SYM_DASH = "─";
 
 // ─── Common print functions ───────────────────────────────────────────────────
@@ -64,7 +63,6 @@ fn stepEmoji(step: []const u8) []const u8 {
     if (std.mem.startsWith(u8, step, "Install")) return "🔧";
     if (std.mem.startsWith(u8, step, "Status")) return SYM_PIN;
     if (std.mem.startsWith(u8, step, "Shell")) return "🐚";
-    if (std.mem.startsWith(u8, step, "Plugin")) return SYM_PLUG;
     if (std.mem.startsWith(u8, step, "Config")) return "⚙️ ";
     if (std.mem.startsWith(u8, step, "Link")) return SYM_LINK;
     if (std.mem.startsWith(u8, step, "Valid")) return SYM_CHECK;

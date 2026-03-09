@@ -478,11 +478,6 @@ pub const ShellCompletions = struct {
     }
 };
 
-pub const PostInstall = union(enum) {
-    helm_plugins: []const []const u8,
-    none: void,
-};
-
 pub const Resource = struct {
     label: []const u8,
     url: []const u8,
@@ -503,7 +498,12 @@ pub const Tool = struct {
     shell_completions: ?ShellCompletions = null,
     /// Short shell aliases written to the integration file, e.g. "k" → alias k=kubectl
     aliases: []const []const u8 = &.{},
-    post_install: ?PostInstall = null,
+    /// Shell commands to run after a fresh install (e.g. `helm plugin install ...`).
+    /// Each entry is passed to `sh -c`. Failures are non-fatal.
+    post_install: []const []const u8 = &.{},
+    /// Shell commands to run after an upgrade (tool was already installed).
+    /// Each entry is passed to `sh -c`. Failures are non-fatal.
+    post_upgrade: []const []const u8 = &.{},
     quick_start: []const []const u8 = &.{},
     resources: []const Resource = &.{},
 };

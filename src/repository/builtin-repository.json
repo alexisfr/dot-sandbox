@@ -25,7 +25,17 @@
         "bash_cmd": "source <(helm completion bash)",
         "zsh_cmd": "source <(helm completion zsh)",
         "fish_cmd": "helm completion fish | source"
-      }
+      },
+      "post_install": [
+        "helm plugin list | grep -q '^diff' || helm plugin install https://github.com/databus23/helm-diff",
+        "helm plugin list | grep -q '^secrets' || helm plugin install https://github.com/jkroepke/helm-secrets",
+        "helm plugin list | grep -q '^helm-git' || helm plugin install https://github.com/aslafy-z/helm-git"
+      ],
+      "post_upgrade": [
+        "helm plugin update diff",
+        "helm plugin update secrets",
+        "helm plugin update helm-git"
+      ]
     },
     {
       "id": "kubectl",

@@ -1,6 +1,8 @@
 const std = @import("std");
 const state_mod = @import("../state.zig");
 const output = @import("../ui/output.zig");
+const http = @import("../http.zig");
+const dot_version = @import("../version.zig");
 
 const HELP =
     \\Usage: dot status
@@ -67,12 +69,29 @@ test "formatTimestamp" {
     try std.testing.expectEqualStrings("bad", formatTimestamp("bad", &buf));
 }
 
+fn checkDotUpdate(allocator: std.mem.Allocator) void {
+    const url = "https://api.github.com/repos/" ++ dot_version.GITHUB_REPO ++ "/releases/latest";
+    const body = http.get(allocator, url) catch return;
+    defer allocator.free(body);
+
+    const Release = struct { tag_name: []const u8 = "" };
+    const parsed = std.json.parseFromSlice(Release, allocator, body, .{ .ignore_unknown_fields = true }) catch return;
+    defer parsed.deinit();
+
+    const tag = parsed.value.tag_name;
+    if (tag.len == 0) return;
+    const latest = if (tag[0] == 'v') tag[1..] else tag;
+
+    if (!std.mem.eql(u8, latest, dot_version.CURRENT)) {
+        std.debug.print("\n{s}ℹ{s}  dot v{s} available → https://github.com/" ++ dot_version.GITHUB_REPO ++ "/releases\n\n", .{ output.CYAN, output.RESET, latest });
+    }
+}
+
 pub fn run(
     allocator: std.mem.Allocator,
     args: []const []const u8,
     state: *state_mod.State,
 ) !void {
-    _ = allocator;
 
     for (args) |a| {
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
@@ -85,6 +104,7 @@ pub fn run(
 
     if (state.tools.count() == 0) {
         printStatusEmpty();
+        checkDotUpdate(allocator);
         return;
     }
 
@@ -111,4 +131,5 @@ pub fn run(
     }
 
     printStatusFooter(state.tools.count());
+    checkDotUpdate(allocator);
 }

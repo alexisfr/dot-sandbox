@@ -2,11 +2,8 @@ const std = @import("std");
 const platform = @import("platform.zig");
 
 const LOCAL_BIN = "~/.local/bin";
-const PLUGIN_DIR = "~/.local/share/dot/plugins";
 const SOURCE_MARKER = "# SOURCE SHELL INTEGRATION";
 const PATH_MARKER = "# ADD LOCAL BIN TO PATH";
-const PLUGIN_PATH_MARKER = "# BEGIN DOT_PLUGINS";
-const PLUGIN_PATH_END = "# END DOT_PLUGINS";
 
 /// Ensure the centralized integration file is sourced from the shell's RC.
 /// Idempotent.
@@ -212,18 +209,6 @@ pub fn rebuildWithoutSection(
     }
 
     return out.toOwnedSlice(allocator);
-}
-
-/// Ensure the plugin directory is in PATH in the integration file.
-pub fn ensurePluginPath(shell: platform.Shell, allocator: std.mem.Allocator) !void {
-    const home = std.posix.getenv("HOME") orelse return error.NoHome;
-    const plugin_dir = try std.fs.path.join(allocator, &.{ home, ".local", "share", "dot", "plugins" });
-    defer allocator.free(plugin_dir);
-
-    const path_config = try shell.pathAddSyntax(plugin_dir, allocator);
-    defer allocator.free(path_config);
-
-    try addSection(shell, "DOT_PLUGINS", path_config, allocator);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

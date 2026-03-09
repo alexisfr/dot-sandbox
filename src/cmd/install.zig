@@ -306,15 +306,49 @@ fn installTool(
         }
     }
 
-    // Post-install runs regardless of install method (e.g. helm plugins)
-    if (t.post_install) |pi| {
-        switch (pi) {
-            .helm_plugins => |plugins| {
-                output.printStep("Plugins", "→", "");
-                installHelmPlugins(allocator, plugins);
-                output.printStep("Plugins", output.SYM_OK, "");
-            },
-            .none => {},
+    // Post-install commands — only on fresh installs, not upgrades (non-fatal)
+    if (!state.isInstalled(t.id) and t.post_install.len > 0) {
+        output.printStep("Post-install", "→", "");
+        for (t.post_install) |cmd| {
+            const wrapped = try std.fmt.allocPrint(allocator, "export PATH=\"$HOME/.local/bin:$PATH\"; {s}", .{cmd});
+            defer allocator.free(wrapped);
+            const result = std.process.Child.run(.{
+                .allocator = allocator,
+                .argv = &.{ "sh", "-c", wrapped },
+            }) catch |e| {
+                output.printFmt("  {s}✗{s} {s} ({s})\n", .{ output.RED, output.RESET, cmd, @errorName(e) });
+                continue;
+            };
+            defer allocator.free(result.stdout);
+            defer allocator.free(result.stderr);
+            if (result.term.Exited == 0) {
+                output.printFmt("  {s}✓{s} {s}\n", .{ output.GREEN, output.RESET, cmd });
+            } else {
+                output.printFmt("  {s}✗{s} {s}\n", .{ output.RED, output.RESET, cmd });
+            }
+        }
+    }
+
+    // Post-upgrade commands — only when upgrading an already-installed tool (non-fatal)
+    if (state.isInstalled(t.id) and t.post_upgrade.len > 0) {
+        output.printStep("Post-upgrade", "→", "");
+        for (t.post_upgrade) |cmd| {
+            const wrapped = try std.fmt.allocPrint(allocator, "export PATH=\"$HOME/.local/bin:$PATH\"; {s}", .{cmd});
+            defer allocator.free(wrapped);
+            const result = std.process.Child.run(.{
+                .allocator = allocator,
+                .argv = &.{ "sh", "-c", wrapped },
+            }) catch |e| {
+                output.printFmt("  {s}✗{s} {s} ({s})\n", .{ output.RED, output.RESET, cmd, @errorName(e) });
+                continue;
+            };
+            defer allocator.free(result.stdout);
+            defer allocator.free(result.stderr);
+            if (result.term.Exited == 0) {
+                output.printFmt("  {s}✓{s} {s}\n", .{ output.GREEN, output.RESET, cmd });
+            } else {
+                output.printFmt("  {s}✗{s} {s}\n", .{ output.RED, output.RESET, cmd });
+            }
         }
     }
 
@@ -350,19 +384,6 @@ fn brewInstall(allocator: std.mem.Allocator, formula: []const u8, force: bool) !
         const msg = std.mem.trim(u8, result.stderr, " \n\r\t");
         if (msg.len > 0) output.printDetail(msg);
         return error.BrewInstallFailed;
-    }
-}
-
-fn installHelmPlugins(allocator: std.mem.Allocator, plugins: []const []const u8) void {
-    for (plugins) |plugin_url| {
-        const result = std.process.Child.run(.{
-            .allocator = allocator,
-            .argv = &.{ "helm", "plugin", "install", plugin_url },
-        }) catch continue;
-        defer allocator.free(result.stdout);
-        defer allocator.free(result.stderr);
-
-        printHelmPlugin(plugin_url, result.term.Exited == 0);
     }
 }
 
@@ -498,13 +519,6 @@ fn printGroupBanner(group_name: []const u8, count: usize) void {
     std.debug.print("Installing group '{s}' ({d} tools)...\n\n", .{ group_name, count });
 }
 
-fn printHelmPlugin(url: []const u8, ok: bool) void {
-    if (ok) {
-        std.debug.print("   {s}{s}{s} {s}\n", .{ output.GREEN, output.SYM_OK, output.RESET, url });
-    } else {
-        std.debug.print("   {s}-{s} {s} (skipped or already installed)\n", .{ output.DIM, output.RESET, url });
-    }
-}
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 

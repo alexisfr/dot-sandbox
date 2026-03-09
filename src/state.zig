@@ -7,13 +7,6 @@ pub const ToolEntry = struct {
     source: []const u8 = "",
     status: []const u8 = "installed",
     pinned: bool = false,
-    tool_plugins: []const []const u8 = &.{},
-};
-
-pub const PluginEntry = struct {
-    installed_at: []const u8 = "",
-    source_url: []const u8 = "",
-    version: []const u8 = "",
 };
 
 /// In-memory representation of state.json.
@@ -22,7 +15,6 @@ pub const State = struct {
     arena: std.heap.ArenaAllocator,
     path: []u8,
     tools: std.StringHashMap(ToolEntry),
-    plugins: std.StringHashMap(PluginEntry),
 
     pub fn init(allocator: std.mem.Allocator) !State {
         const home = std.posix.getenv("HOME") orelse "/tmp";
@@ -41,14 +33,12 @@ pub const State = struct {
         const path = try allocator.dupe(u8, state_path);
         const arena = std.heap.ArenaAllocator.init(allocator);
         const tools = std.StringHashMap(ToolEntry).init(allocator);
-        const plugins = std.StringHashMap(PluginEntry).init(allocator);
 
         var state = State{
             .allocator = allocator,
             .arena = arena,
             .path = path,
             .tools = tools,
-            .plugins = plugins,
         };
 
         // Try to load existing state; ignore if missing
@@ -62,7 +52,6 @@ pub const State = struct {
 
     pub fn deinit(self: *State) void {
         self.tools.deinit();
-        self.plugins.deinit();
         self.arena.deinit();
         self.allocator.free(self.path);
     }
@@ -72,12 +61,6 @@ pub const State = struct {
         defer file.close();
 
         const content = try file.readToEndAlloc(self.arena.allocator(), 4 * 1024 * 1024);
-
-        const Schema = struct {
-            version: []const u8 = "1.0",
-            tools: ?std.json.Value = null,
-            plugins: ?std.json.Value = null,
-        };
 
         const parsed = try std.json.parseFromSlice(
             std.json.Value,
@@ -113,25 +96,6 @@ pub const State = struct {
             }
         }
 
-        // Load plugins
-        if (root.object.get("plugins")) |plugins_val| {
-            if (plugins_val == .object) {
-                var it = plugins_val.object.iterator();
-                while (it.next()) |kv| {
-                    const pv = kv.value_ptr.*;
-                    if (pv != .object) continue;
-
-                    const entry = PluginEntry{
-                        .installed_at = if (pv.object.get("installed_at")) |v| if (v == .string) v.string else "" else "",
-                        .source_url = if (pv.object.get("source_url")) |v| if (v == .string) v.string else "" else "",
-                        .version = if (pv.object.get("version")) |v| if (v == .string) v.string else "" else "",
-                    };
-
-                    try self.plugins.put(kv.key_ptr.*, entry);
-                }
-            }
-        }
-        _ = Schema{};
     }
 
     pub fn save(self: *State) !void {
@@ -165,26 +129,6 @@ pub const State = struct {
                 t.status,
                 if (t.pinned) "true" else "false",
             });
-            defer self.allocator.free(line);
-            try buf.appendSlice(self.allocator, line);
-        }
-
-        try buf.appendSlice(self.allocator, "\n  },\n  \"plugins\": {\n");
-
-        var first_plugin = true;
-        var plugin_it = self.plugins.iterator();
-        while (plugin_it.next()) |kv| {
-            if (!first_plugin) try buf.appendSlice(self.allocator, ",\n");
-            first_plugin = false;
-
-            const p = kv.value_ptr.*;
-            const line = try std.fmt.allocPrint(self.allocator,
-                \\    "{s}": {{
-                \\      "installed_at": "{s}",
-                \\      "source_url": "{s}",
-                \\      "version": "{s}"
-                \\    }}
-            , .{ kv.key_ptr.*, p.installed_at, p.source_url, p.version });
             defer self.allocator.free(line);
             try buf.appendSlice(self.allocator, line);
         }
@@ -240,24 +184,6 @@ pub const State = struct {
         try self.save();
     }
 
-    pub fn addPlugin(self: *State, name: []const u8, source_url: []const u8, version: []const u8) !void {
-        const arena_alloc = self.arena.allocator();
-        const ts = std.time.timestamp();
-        const installed_at = try std.fmt.allocPrint(arena_alloc, "{d}", .{ts});
-
-        const key = try arena_alloc.dupe(u8, name);
-        try self.plugins.put(key, .{
-            .installed_at = installed_at,
-            .source_url = try arena_alloc.dupe(u8, source_url),
-            .version = try arena_alloc.dupe(u8, version),
-        });
-        try self.save();
-    }
-
-    pub fn removePlugin(self: *State, name: []const u8) !void {
-        _ = self.plugins.remove(name);
-        try self.save();
-    }
 };
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -277,7 +203,6 @@ test "State: empty state has no tools" {
     try std.testing.expect(!state.isInstalled("helm"));
     try std.testing.expect(state.getVersion("helm") == null);
     try std.testing.expectEqual(@as(usize, 0), state.tools.count());
-    try std.testing.expectEqual(@as(usize, 0), state.plugins.count());
 }
 
 test "State: addTool and isInstalled" {
@@ -316,30 +241,6 @@ test "State: removeTool" {
     try std.testing.expect(!state.isInstalled("kubectl"));
 }
 
-test "State: addPlugin and removePlugin" {
-    var tmp = std.testing.tmpDir(.{});
-    defer tmp.cleanup();
-
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir_path = try tmp.dir.realpath(".", &path_buf);
-    const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
-    defer std.testing.allocator.free(state_path);
-
-    var state = try State.initAt(std.testing.allocator, state_path);
-    defer state.deinit();
-
-    try std.testing.expect(!state.plugins.contains("myplugin"));
-    try state.addPlugin("myplugin", "https://github.com/org/myplugin.git", "latest");
-    try std.testing.expect(state.plugins.contains("myplugin"));
-
-    const entry = state.plugins.get("myplugin").?;
-    try std.testing.expectEqualStrings("https://github.com/org/myplugin.git", entry.source_url);
-    try std.testing.expectEqualStrings("latest", entry.version);
-
-    try state.removePlugin("myplugin");
-    try std.testing.expect(!state.plugins.contains("myplugin"));
-}
-
 test "State: save and load round-trip" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
@@ -354,7 +255,6 @@ test "State: save and load round-trip" {
         var state = try State.initAt(std.testing.allocator, state_path);
         defer state.deinit();
         try state.addTool("terraform", "1.7.0", "hashicorp_release", false);
-        try state.addPlugin("my-plugin", "https://example.com/plugin.git", "latest");
     }
 
     // Reload and verify
@@ -363,7 +263,6 @@ test "State: save and load round-trip" {
         defer state.deinit();
         try std.testing.expect(state.isInstalled("terraform"));
         try std.testing.expectEqualStrings("1.7.0", state.getVersion("terraform").?);
-        try std.testing.expect(state.plugins.contains("my-plugin"));
     }
 }
 
