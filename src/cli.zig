@@ -23,28 +23,19 @@ const HELP =
     \\Usage: dot <command> [options]
     \\
     \\Commands:
-    \\  install <tool> [version]    Install a tool (pin with explicit version)
-    \\  install --group <group>     Install all tools in a group
-    \\  uninstall <tool>            Uninstall a tool
-    \\  list [--group <group>]      List available tools
-    \\  status                      Show installed tools and versions
-    \\  upgrade [tool|group]        Upgrade installed tools (skips pinned)
-    \\  upgrade --force             Force upgrade, including pinned tools
-    \\  doctor                      Check system health
-    \\  repository <subcommand>      Manage external repositories
+    \\  install     Install a tool or group of tools
+    \\  uninstall   Remove a tool
+    \\  upgrade     Upgrade installed tools
+    \\  list        List available tools
+    \\  status      Show installed tools and versions
+    \\  doctor      Check system health
+    \\  repository  Manage external repositories
     \\
-    \\Groups:  k8s, cloud, iac, containers, utils, terminal, all
-    \\
-    \\Repository subcommands:
-    \\  repository add <url>
-    \\  repository list
-    \\  repository remove <name>
-    \\  repository update [name]
+    \\Use 'dot <command> --help' for command-specific options and examples.
     \\
     \\Options:
-    \\  --version, -v         Show version
-    \\  --help, -h            Show this help
-    \\  <command> --help      Show help for a specific command
+    \\  --version, -v    Show version
+    \\  --help, -h       Show this help
     \\
     \\
 ;

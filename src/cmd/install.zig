@@ -43,13 +43,11 @@ const HELP =
     \\Arguments:
     \\  <tool>         Tool ID to install (e.g. helm, kubectl)
     \\  [version]      Pin to a specific version (e.g. 1.8.0)
-    \\  --group, -g    Install all tools in a group
     \\
     \\Options:
-    \\  --force        Force reinstall, even if already up to date
+    \\  --group, -g    Install all tools in a group
+    \\  --force        Force reinstall, even if already installed
     \\  --help, -h     Show this help
-    \\
-    \\Groups:  k8s, cloud, iac, containers, utils, terminal, all
     \\
     \\Pinning:
     \\  Specifying a version pins the tool — it will be skipped by
@@ -63,6 +61,31 @@ const HELP =
     \\
 ;
 
+fn printAvailableGroups(tools: []const tool_mod.Tool) void {
+    const max_groups = 10;
+    const n_fields = @typeInfo(tool_mod.Group).@"enum".fields.len;
+    var seen = [_]bool{false} ** n_fields;
+
+    for (tools) |t| {
+        for (t.groups) |g| {
+            seen[@intFromEnum(g)] = true;
+        }
+    }
+
+    std.debug.print("Groups: ", .{});
+    var shown: usize = 0;
+    inline for (std.meta.fields(tool_mod.Group)) |field| {
+        if (shown >= max_groups) break;
+        if (seen[field.value]) {
+            if (shown > 0) std.debug.print(", ", .{});
+            std.debug.print("{s}", .{field.name});
+            shown += 1;
+        }
+    }
+    if (shown > 0) std.debug.print(", all", .{});
+    std.debug.print("\n\n", .{});
+}
+
 pub fn run(
     allocator: std.mem.Allocator,
     args: []const []const u8,
@@ -71,12 +94,14 @@ pub fn run(
 ) !void {
     if (args.len == 0) {
         output.printRaw(HELP);
+        printAvailableGroups(tools);
         return;
     }
 
     for (args) |a| {
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
             output.printRaw(HELP);
+            printAvailableGroups(tools);
             return;
         }
     }

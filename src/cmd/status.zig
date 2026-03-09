@@ -8,7 +8,7 @@ const HELP =
     \\Usage: dot status
     \\
     \\Show all tools currently installed by dot, with version,
-    \\install date, install method, and pin status.
+    \\install date, and install method.
     \\
     \\Options:
     \\  --help, -h    Show this help
