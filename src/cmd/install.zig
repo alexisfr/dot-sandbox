@@ -5,6 +5,13 @@ const platform = @import("../platform.zig");
 const shell_mod = @import("../shell.zig");
 const output = @import("../ui/output.zig");
 const validate = @import("../validate.zig");
+const http = @import("../http.zig");
+const progress_mod = @import("../ui/progress.zig");
+
+fn progressCbFn(ctx: *anyopaque, done: u64, total: ?u64) void {
+    const bar: *progress_mod.ProgressBar = @ptrCast(@alignCast(ctx));
+    bar.update(done, total, "");
+}
 
 pub const InstallArgs = struct {
     force: bool = false,
@@ -257,13 +264,13 @@ fn installTool(
     defer allocator.free(src_line);
     printSummary(&.{ pkg_line, plat_line, src_line });
 
-    output.printStep("Pre-checks", "✓", "Ready");
+    output.printStep("Pre-checks", output.SYM_OK, "Ready");
 
     // Brew install path: preferred when brew is available and tool declares a formula
     var used_brew = false;
     if (t.brew_formula) |formula| {
         if (platform.PackageManager.brew.isAvailable()) {
-            output.printStep("Brew", "→", formula);
+            output.printStep("Brew", output.SYM_ARROW, formula);
             brewInstall(allocator, formula, force) catch |e| {
                 output.printStep("Brew", output.SYM_FAIL, @errorName(e));
                 output.printError("brew install failed");
@@ -286,6 +293,7 @@ fn installTool(
         std.fs.cwd().makePath(tmp_dir) catch {};
         defer std.fs.cwd().deleteTree(tmp_dir) catch {};
 
+        var bar = progress_mod.ProgressBar{ .step = "Downloading" };
         var ctx = tool_mod.InstallContext{
             .allocator = allocator,
             .id = t.id,
@@ -294,14 +302,16 @@ fn installTool(
             .arch = arch,
             .bin_dir = bin_dir,
             .tmp_dir = tmp_dir,
+            .progress = http.ProgressCallback{ .context = &bar, .func = progressCbFn },
         };
 
-        output.printStep("Downloading", "→", "");
         t.strategy.execute(&ctx) catch |e| {
+            bar.finish();
             output.printStep("Installation", output.SYM_FAIL, @errorName(e));
             output.printError("Installation failed");
             return e;
         };
+        bar.finish();
         output.printStep("Installation", output.SYM_OK, bin_dir);
 
         // Shell integration (brew handles its own PATH and completions)
@@ -333,7 +343,7 @@ fn installTool(
 
     // Post-install commands — only on fresh installs, not upgrades (non-fatal)
     if (!state.isInstalled(t.id) and t.post_install.len > 0) {
-        output.printStep("Post-install", "→", "");
+        output.printStep("Post-install", output.SYM_ARROW, "");
         for (t.post_install) |cmd| {
             const wrapped = try std.fmt.allocPrint(allocator, "export PATH=\"$HOME/.local/bin:$PATH\"; {s}", .{cmd});
             defer allocator.free(wrapped);
@@ -341,22 +351,22 @@ fn installTool(
                 .allocator = allocator,
                 .argv = &.{ "sh", "-c", wrapped },
             }) catch |e| {
-                output.printFmt("  {s}✗{s} {s} ({s})\n", .{ output.RED, output.RESET, cmd, @errorName(e) });
+                output.printFmt("  {s}{s}{s} {s} ({s})\n", .{ output.RED, output.SYM_FAIL, output.RESET, cmd, @errorName(e) });
                 continue;
             };
             defer allocator.free(result.stdout);
             defer allocator.free(result.stderr);
             if (result.term.Exited == 0) {
-                output.printFmt("  {s}✓{s} {s}\n", .{ output.GREEN, output.RESET, cmd });
+                output.printFmt("  {s}{s}{s} {s}\n", .{ output.GREEN, output.SYM_OK, output.RESET, cmd });
             } else {
-                output.printFmt("  {s}✗{s} {s}\n", .{ output.RED, output.RESET, cmd });
+                output.printFmt("  {s}{s}{s} {s}\n", .{ output.RED, output.SYM_FAIL, output.RESET, cmd });
             }
         }
     }
 
     // Post-upgrade commands — only when upgrading an already-installed tool (non-fatal)
     if (state.isInstalled(t.id) and t.post_upgrade.len > 0) {
-        output.printStep("Post-upgrade", "→", "");
+        output.printStep("Post-upgrade", output.SYM_ARROW, "");
         for (t.post_upgrade) |cmd| {
             const wrapped = try std.fmt.allocPrint(allocator, "export PATH=\"$HOME/.local/bin:$PATH\"; {s}", .{cmd});
             defer allocator.free(wrapped);
@@ -364,15 +374,15 @@ fn installTool(
                 .allocator = allocator,
                 .argv = &.{ "sh", "-c", wrapped },
             }) catch |e| {
-                output.printFmt("  {s}✗{s} {s} ({s})\n", .{ output.RED, output.RESET, cmd, @errorName(e) });
+                output.printFmt("  {s}{s}{s} {s} ({s})\n", .{ output.RED, output.SYM_FAIL, output.RESET, cmd, @errorName(e) });
                 continue;
             };
             defer allocator.free(result.stdout);
             defer allocator.free(result.stderr);
             if (result.term.Exited == 0) {
-                output.printFmt("  {s}✓{s} {s}\n", .{ output.GREEN, output.RESET, cmd });
+                output.printFmt("  {s}{s}{s} {s}\n", .{ output.GREEN, output.SYM_OK, output.RESET, cmd });
             } else {
-                output.printFmt("  {s}✗{s} {s}\n", .{ output.RED, output.RESET, cmd });
+                output.printFmt("  {s}{s}{s} {s}\n", .{ output.RED, output.SYM_FAIL, output.RESET, cmd });
             }
         }
     }

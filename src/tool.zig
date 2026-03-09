@@ -159,6 +159,7 @@ pub const InstallContext = struct {
     arch: platform.Arch,
     bin_dir: []const u8,
     tmp_dir: []const u8,
+    progress: ?http.ProgressCallback = null,
 };
 
 pub const InstallStrategy = union(enum) {
@@ -186,7 +187,7 @@ pub const InstallStrategy = union(enum) {
             defer ctx.allocator.free(archive_path);
 
             output.printDownloading(url);
-            try http.download(ctx.allocator, url, archive_path);
+            try http.download(ctx.allocator, url, archive_path, ctx.progress);
 
             // Verify checksum if available
             if (self.checksum_url_template) |tmpl| {
@@ -201,6 +202,7 @@ pub const InstallStrategy = union(enum) {
             const extract_dir = try std.fs.path.join(ctx.allocator, &.{ ctx.tmp_dir, "extract" });
             defer ctx.allocator.free(extract_dir);
 
+            output.printStep("Extracting", output.SYM_ARROW, filename);
             if (std.mem.endsWith(u8, archive_path, ".tar.gz") or
                 std.mem.endsWith(u8, archive_path, ".tgz"))
             {
@@ -232,7 +234,7 @@ pub const InstallStrategy = union(enum) {
             defer ctx.allocator.free(tmp_bin);
 
             output.printDownloading(url);
-            try http.download(ctx.allocator, url, tmp_bin);
+            try http.download(ctx.allocator, url, tmp_bin, ctx.progress);
 
             try installBinary(ctx, tmp_bin);
         }
@@ -264,11 +266,12 @@ pub const InstallStrategy = union(enum) {
             defer ctx.allocator.free(archive_path);
 
             output.printDownloading(url);
-            try http.download(ctx.allocator, url, archive_path);
+            try http.download(ctx.allocator, url, archive_path, ctx.progress);
 
             const extract_dir = try std.fmt.allocPrint(ctx.allocator, "{s}/extract", .{ctx.tmp_dir});
             defer ctx.allocator.free(extract_dir);
 
+            output.printStep("Extracting", output.SYM_ARROW, std.fs.path.basename(archive_path));
             try archive.extractZip(archive_path, extract_dir);
 
             const src_bin = try std.fs.path.join(ctx.allocator, &.{ extract_dir, self.product });
@@ -402,11 +405,12 @@ pub const InstallStrategy = union(enum) {
             defer ctx.allocator.free(archive_path);
 
             output.printDownloading(url);
-            try http.download(ctx.allocator, url, archive_path);
+            try http.download(ctx.allocator, url, archive_path, ctx.progress);
 
             const extract_dir = try std.fmt.allocPrint(ctx.allocator, "{s}/extract", .{ctx.tmp_dir});
             defer ctx.allocator.free(extract_dir);
 
+            output.printStep("Extracting", output.SYM_ARROW, filename);
             if (std.mem.endsWith(u8, archive_path, ".tar.gz") or
                 std.mem.endsWith(u8, archive_path, ".tgz"))
             {

@@ -107,7 +107,7 @@ fn printListHeader(term_width: usize) void {
         output.BOLD, "Tool", "Status", "Groups", output.RESET,
     });
     std.debug.print("{s}", .{output.DIM});
-    for (0..@min(term_width, 200)) |_| std.debug.print(output.SYM_DASH, .{});
+    for (0..@min(term_width, 200)) |_| std.debug.print("{s}", .{output.SYM_DASH});
     std.debug.print("{s}\n", .{output.RESET});
 }
 
@@ -152,9 +152,9 @@ fn printListRow(id: []const u8, aliases: []const []const u8, desc: []const u8, v
     // status column: 14 visual chars + 1 trailing space = 15 total
     if (version) |v| {
         const v_trunc = v[0..@min(v.len, 12)];
-        std.debug.print(output.GREEN ++ output.SYM_OK ++ " {s:<12}" ++ output.RESET ++ " ", .{v_trunc});
+        std.debug.print("{s}{s} {s:<12}{s} ", .{ output.GREEN, output.SYM_OK, v_trunc, output.RESET });
     } else {
-        std.debug.print(output.DIM ++ "not installed" ++ output.RESET ++ "  ", .{});
+        std.debug.print("{s}not installed{s}  ", .{ output.DIM, output.RESET });
     }
 
     // groups column — ASCII, byte-pad fine; truncate if somehow over COL_GROUPS

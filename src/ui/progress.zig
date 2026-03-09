@@ -1,30 +1,128 @@
 const std = @import("std");
+const output = @import("output.zig");
 
-const YELLOW = "\x1b[1;33m";
-const RESET = "\x1b[0m";
+/// Minimum milliseconds between redraws. Prevents flickering on fast connections.
+const REDRAW_INTERVAL_MS: i64 = 50; // 20 fps max
 
-/// Simple progress bar printed to stderr.
-/// Call `update(current, total, detail)` repeatedly, then `finish()`.
+/// Simple in-place progress bar printed to stderr using \r.
+/// Call `update(current, total, detail)` each chunk, then `finish()` when done.
+///
+/// finish() is also called automatically from update() the moment current >= total,
+/// so the bar locks in place immediately at download completion.
 pub const ProgressBar = struct {
     step: []const u8,
     width: usize = 20,
+    /// Tracked by update(); used by finish() to format the final size.
+    bytes_done: u64 = 0,
+    bytes_total: ?u64 = null,
+    /// Set by finish() to make it idempotent.
+    finished: bool = false,
+    /// Set to true once renderBar() has drawn at least one frame.
+    rendered: bool = false,
+    /// Timestamp (ms) of last redraw, for rate limiting.
+    last_draw_ms: i64 = 0,
 
-    pub fn update(self: ProgressBar, current: u64, total: u64, detail: []const u8) void {
-        const pct: u64 = if (total > 0) @min(current * 100 / total, 100) else 0;
-        const filled: usize = if (total > 0) @intCast(@min(pct * self.width / 100, self.width)) else 0;
-        const empty = self.width - filled;
+    pub fn update(self: *ProgressBar, current: u64, total: ?u64, detail: []const u8) void {
+        if (self.finished) return;
 
-        std.debug.print("\r📥 {s:<22} {s}[", .{ self.step, YELLOW });
-        var i: usize = 0;
-        while (i < filled) : (i += 1) std.debug.print("█", .{});
-        i = 0;
-        while (i < empty) : (i += 1) std.debug.print("░", .{});
-        std.debug.print("]{s} {d}% {s}", .{ RESET, pct, detail });
+        self.bytes_done = current;
+        self.bytes_total = total;
+
+        if (output.getRenderMode() != .pipe) {
+            const now = std.time.milliTimestamp();
+            const at_100 = if (total) |t| current >= t else false;
+            // Always draw at 100%; otherwise throttle to REDRAW_INTERVAL_MS.
+            if (at_100 or now - self.last_draw_ms >= REDRAW_INTERVAL_MS) {
+                self.last_draw_ms = now;
+                renderBar(self, current, total, detail);
+            }
+        }
+
+        // Auto-complete as soon as download reaches 100%.
+        if (total) |t| {
+            if (current >= t) self.finish();
+        }
     }
 
-    pub fn finish(self: ProgressBar, detail: []const u8) void {
-        _ = self;
-        std.debug.print("\r{s:<60}\r", .{" "}); // clear line
-        _ = detail;
+    /// Build and write the entire bar as a single string to avoid partial-frame glitches.
+    fn renderBar(self: *ProgressBar, current: u64, total: ?u64, detail: []const u8) void {
+        self.rendered = true;
+        const mode = output.getRenderMode();
+        const fill: []const u8 = if (mode == .rich) "█" else "=";
+        const empty_ch: []const u8 = if (mode == .rich) "░" else " ";
+        const prefix: []const u8 = if (mode == .rich) "📥" else "[DL]";
+
+        // Build the complete bar line into a stack buffer, then write it in one shot.
+        var buf: [512]u8 = undefined;
+        var fbs = std.io.fixedBufferStream(&buf);
+        const w = fbs.writer();
+
+        if (total) |t| {
+            const pct: u64 = if (t > 0) @min(current * 100 / t, 100) else 0;
+            const filled: usize = @intCast(@min(pct * self.width / 100, self.width));
+            const n_empty = self.width - filled;
+
+            var done_buf: [32]u8 = undefined;
+            var total_buf: [32]u8 = undefined;
+            const done_str = fmtBytes(current, &done_buf);
+            const total_str = fmtBytes(t, &total_buf);
+
+            w.print("\r{s} {s}{s:<22}{s} [{s}{s}{s}] [", .{
+                prefix, output.CYAN, self.step, output.RESET,
+                output.YELLOW, output.SYM_ARROW, output.RESET,
+            }) catch return;
+            for (0..filled) |_| w.writeAll(fill) catch return;
+            for (0..n_empty) |_| w.writeAll(empty_ch) catch return;
+            w.print("] {d:3}%  {s} / {s}{s}", .{ pct, done_str, total_str, detail }) catch return;
+        } else {
+            var done_buf: [32]u8 = undefined;
+            const done_str = fmtBytes(current, &done_buf);
+
+            w.print("\r{s} {s}{s:<22}{s} [{s}{s}{s}] [", .{
+                prefix, output.CYAN, self.step, output.RESET,
+                output.YELLOW, output.SYM_ARROW, output.RESET,
+            }) catch return;
+            for (0..self.width) |_| w.writeAll(fill) catch return;
+            w.print("]  --   {s}{s}", .{ done_str, detail }) catch return;
+        }
+
+        std.debug.print("{s}", .{fbs.getWritten()});
+    }
+
+    /// Lock the bar in place and move to the next line so subsequent output
+    /// doesn't overwrite it. In pipe mode, prints a step line instead.
+    /// Safe to call multiple times — only acts on the first call.
+    pub fn finish(self: *ProgressBar) void {
+        if (self.finished) return;
+        self.finished = true;
+
+        switch (output.getRenderMode()) {
+            .pipe => {
+                // Pipe: print a completion step line (no bar was drawn)
+                var bytes_buf: [32]u8 = undefined;
+                const final_bytes = self.bytes_total orelse self.bytes_done;
+                const detail = fmtBytes(final_bytes, &bytes_buf);
+                output.printStep(self.step, output.SYM_OK, detail);
+            },
+            .plain, .rich => {
+                // Lock the bar at its current state by moving to the next line.
+                // Only emit \n if the bar was actually drawn; otherwise stay silent.
+                if (self.rendered) std.debug.print("\n", .{});
+            },
+        }
     }
 };
+
+pub fn fmtBytes(bytes: u64, buf: []u8) []const u8 {
+    if (bytes >= 1024 * 1024) {
+        const mb = bytes / (1024 * 1024);
+        const frac = (bytes % (1024 * 1024)) * 10 / (1024 * 1024);
+        return std.fmt.bufPrint(buf, "{d}.{d} MB", .{ mb, frac }) catch "???";
+    } else if (bytes >= 1024) {
+        const kb = bytes / 1024;
+        const frac = (bytes % 1024) * 10 / 1024;
+        return std.fmt.bufPrint(buf, "{d}.{d} KB", .{ kb, frac }) catch "???";
+    } else {
+        return std.fmt.bufPrint(buf, "{d} B", .{bytes}) catch "???";
+    }
+}

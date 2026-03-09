@@ -41,6 +41,8 @@ const HELP =
 ;
 
 pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
+    output.initCaps(); // detect terminal capabilities before any output
+
     if (argv.len < 2) {
         output.printRaw(HELP);
         return;

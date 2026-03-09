@@ -144,7 +144,7 @@ fn cmdList(allocator: std.mem.Allocator) !void {
         output.BOLD, "Name", "Tools", "Last Fetched", "URL", output.RESET,
     });
     std.debug.print("{s}", .{output.DIM});
-    for (0..80) |_| std.debug.print(output.SYM_DASH, .{});
+    for (0..80) |_| std.debug.print("{s}", .{output.SYM_DASH});
     std.debug.print("{s}\n", .{output.RESET});
 
     for (sources) |s| {

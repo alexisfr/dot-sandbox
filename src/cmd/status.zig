@@ -23,7 +23,7 @@ fn printStatusHeader() void {
         output.BOLD, "Tool", "Version", "Installed At", "Method", output.RESET,
     });
     std.debug.print("{s}", .{output.DIM});
-    for (0..72) |_| std.debug.print(output.SYM_DASH, .{});
+    for (0..72) |_| std.debug.print("{s}", .{output.SYM_DASH});
     std.debug.print("{s}\n", .{output.RESET});
 }
 

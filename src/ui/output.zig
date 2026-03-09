@@ -1,31 +1,73 @@
 const std = @import("std");
 
+// ─── Render mode ──────────────────────────────────────────────────────────────
+
+pub const RenderMode = enum { rich, plain, pipe };
+
+var render_mode: RenderMode = .rich;
+
+/// Detect terminal capabilities. Call once at program startup before any output.
+pub fn initCaps() void {
+    const no_color = std.posix.getenv("NO_COLOR") != null;
+    const dumb_term = if (std.posix.getenv("TERM")) |t| std.mem.eql(u8, t, "dumb") else false;
+    const is_tty = std.posix.isatty(2); // fd 2 = stderr
+
+    render_mode = if (!is_tty) .pipe else if (no_color or dumb_term) .plain else .rich;
+
+    if (render_mode != .rich) {
+        CYAN = "";
+        GREEN = "";
+        RED = "";
+        YELLOW = "";
+        DIM = "";
+        BOLD = "";
+        RESET = "";
+        SYM_OK = "ok";
+        SYM_FAIL = "FAIL";
+        SYM_WARN = "WARN";
+        SYM_CHECK = "[OK]";
+        SYM_PIN = "[PIN]";
+        SYM_LIST = "[INFO]";
+        SYM_BOOKS = "[DOC]";
+        SYM_LINK = "[LK]";
+        SYM_SEARCH = "[..]";
+        SYM_DASH = "-";
+        SYM_ARROW = "->";
+    }
+}
+
+pub fn getRenderMode() RenderMode {
+    return render_mode;
+}
+
 // ─── ANSI codes ───────────────────────────────────────────────────────────────
 // Defined here so all styling is configured in one place.
-// cmd/ files import these constants rather than hardcoding escape sequences.
+// cmd/ files import these variables rather than hardcoding escape sequences.
+// In plain/pipe mode, initCaps() sets these to empty strings.
 
-pub const CYAN = "\x1b[0;36m";
-pub const GREEN = "\x1b[1;32m";
-pub const RED = "\x1b[1;31m";
-pub const YELLOW = "\x1b[1;33m";
-pub const DIM = "\x1b[2m";
-pub const BOLD = "\x1b[1m";
-pub const RESET = "\x1b[0m";
+pub var CYAN: []const u8 = "\x1b[0;36m";
+pub var GREEN: []const u8 = "\x1b[1;32m";
+pub var RED: []const u8 = "\x1b[1;31m";
+pub var YELLOW: []const u8 = "\x1b[1;33m";
+pub var DIM: []const u8 = "\x1b[2m";
+pub var BOLD: []const u8 = "\x1b[1m";
+pub var RESET: []const u8 = "\x1b[0m";
 
 // ─── Symbols / Emoji ─────────────────────────────────────────────────────────
-// Defined here so they can be swapped for ASCII equivalents on terminals that
-// do not support Unicode or emoji (e.g. NO_COLOR, Windows cmd, CI logs).
+// initCaps() replaces these with ASCII equivalents in plain/pipe mode.
 
-pub const SYM_OK = "✓";
-pub const SYM_FAIL = "✗";
-pub const SYM_WARN = "⚠";
-pub const SYM_CHECK = "✅";
-pub const SYM_PIN = "📌";
-pub const SYM_LIST = "📋";
-pub const SYM_BOOKS = "📚";
-pub const SYM_LINK = "🔗";
-pub const SYM_SEARCH = "🔍";
-pub const SYM_DASH = "─";
+pub var SYM_OK: []const u8 = "✓";
+pub var SYM_FAIL: []const u8 = "✗";
+pub var SYM_WARN: []const u8 = "⚠";
+pub var SYM_CHECK: []const u8 = "✅";
+pub var SYM_PIN: []const u8 = "📌";
+pub var SYM_LIST: []const u8 = "📋";
+pub var SYM_BOOKS: []const u8 = "📚";
+pub var SYM_LINK: []const u8 = "🔗";
+pub var SYM_SEARCH: []const u8 = "🔍";
+pub var SYM_DASH: []const u8 = "─";
+/// Progress/in-flight indicator: "→" in rich mode, "->" in plain/pipe.
+pub var SYM_ARROW: []const u8 = "→";
 
 // ─── Common print functions ───────────────────────────────────────────────────
 
@@ -55,27 +97,43 @@ pub fn printUnknownTool(id: []const u8) void {
 
 // ─── Step progress (shared by install and uninstall commands) ─────────────────
 
-fn stepEmoji(step: []const u8) []const u8 {
-    if (std.mem.startsWith(u8, step, "Pre-check")) return SYM_SEARCH;
-    if (std.mem.startsWith(u8, step, "Download")) return "📥";
-    if (std.mem.startsWith(u8, step, "Verif")) return "🔐";
-    if (std.mem.startsWith(u8, step, "Extract")) return "📦";
-    if (std.mem.startsWith(u8, step, "Install")) return "🔧";
-    if (std.mem.startsWith(u8, step, "Status")) return SYM_PIN;
-    if (std.mem.startsWith(u8, step, "Shell")) return "🐚";
-    if (std.mem.startsWith(u8, step, "Config")) return "⚙️ ";
-    if (std.mem.startsWith(u8, step, "Link")) return SYM_LINK;
-    if (std.mem.startsWith(u8, step, "Valid")) return SYM_CHECK;
-    if (std.mem.startsWith(u8, step, "Cleanup")) return "🧹";
-    if (std.mem.startsWith(u8, step, "Brew")) return "🍺";
-    return "• ";
+fn stepPrefix(step: []const u8) []const u8 {
+    if (render_mode == .rich) {
+        if (std.mem.startsWith(u8, step, "Pre-check")) return SYM_SEARCH;
+        if (std.mem.startsWith(u8, step, "Download")) return "📥";
+        if (std.mem.startsWith(u8, step, "Verif")) return "🔐";
+        if (std.mem.startsWith(u8, step, "Extract")) return "📦";
+        if (std.mem.startsWith(u8, step, "Install")) return "🔧";
+        if (std.mem.startsWith(u8, step, "Status")) return SYM_PIN;
+        if (std.mem.startsWith(u8, step, "Shell")) return "🐚";
+        if (std.mem.startsWith(u8, step, "Config")) return "⚙️ ";
+        if (std.mem.startsWith(u8, step, "Link")) return SYM_LINK;
+        if (std.mem.startsWith(u8, step, "Valid")) return SYM_CHECK;
+        if (std.mem.startsWith(u8, step, "Cleanup")) return "🧹";
+        if (std.mem.startsWith(u8, step, "Brew")) return "🍺";
+        return "• ";
+    } else {
+        if (std.mem.startsWith(u8, step, "Pre-check")) return "[..]";
+        if (std.mem.startsWith(u8, step, "Download")) return "[DL]";
+        if (std.mem.startsWith(u8, step, "Verif")) return "[VF]";
+        if (std.mem.startsWith(u8, step, "Extract")) return "[EX]";
+        if (std.mem.startsWith(u8, step, "Install")) return "[IN]";
+        if (std.mem.startsWith(u8, step, "Status")) return "[PI]";
+        if (std.mem.startsWith(u8, step, "Shell")) return "[SH]";
+        if (std.mem.startsWith(u8, step, "Config")) return "[CF]";
+        if (std.mem.startsWith(u8, step, "Link")) return "[LK]";
+        if (std.mem.startsWith(u8, step, "Valid")) return "[OK]";
+        if (std.mem.startsWith(u8, step, "Cleanup")) return "[CL]";
+        if (std.mem.startsWith(u8, step, "Brew")) return "[BR]";
+        return "[--]";
+    }
 }
 
 pub fn printStep(step: []const u8, status: []const u8, detail: []const u8) void {
-    const emoji = stepEmoji(step);
+    const prefix = stepPrefix(step);
     const color = if (std.mem.eql(u8, status, SYM_OK))
         GREEN
-    else if (std.mem.eql(u8, status, "→"))
+    else if (std.mem.eql(u8, status, SYM_ARROW))
         YELLOW
     else if (std.mem.eql(u8, status, SYM_FAIL))
         RED
@@ -83,18 +141,24 @@ pub fn printStep(step: []const u8, status: []const u8, detail: []const u8) void 
         DIM;
 
     std.debug.print("{s} {s}{s:<22}{s} [{s}{s}{s}] {s}\n", .{
-        emoji, CYAN, step, RESET, color, status, RESET, detail,
+        prefix, CYAN, step, RESET, color, status, RESET, detail,
     });
 }
 
 // ─── Install progress (called from strategy execute() in tool.zig) ────────────
 
+/// In pipe mode: prints a step line with the URL basename so CI logs show progress.
+/// In rich/plain mode: no-op because the ProgressBar handles display.
 pub fn printDownloading(url: []const u8) void {
-    std.debug.print("   Downloading {s}\n", .{url});
+    if (render_mode == .pipe) {
+        const basename = std.fs.path.basename(url);
+        printStep("Downloading", SYM_ARROW, basename);
+    }
 }
 
+/// No-op: install.zig's printStep("Installation", ...) shows the path instead.
 pub fn printInstalledTo(path: []const u8) void {
-    std.debug.print("   Installed to {s}\n", .{path});
+    _ = path;
 }
 
 pub fn printRunningCmd(cmd: []const u8, arg: []const u8) void {
