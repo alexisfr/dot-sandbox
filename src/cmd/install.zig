@@ -223,7 +223,6 @@ fn installTool(
     if (!force and version_arg == null) {
         if (state.isPinned(t.id)) {
             const pinned_ver = state.getVersion(t.id) orelse "pinned";
-            printBox(t.name, pinned_ver);
             printPinnedSkip(t.name, pinned_ver);
             return;
         }
@@ -233,7 +232,6 @@ fn installTool(
     if (!force) {
         if (checkSystemInstall(allocator, t.id)) |sys_path| {
             defer allocator.free(sys_path);
-            printBox(t.name, version);
             printSkipSystem(t.name, sys_path, "unknown", version);
             return;
         }
@@ -243,28 +241,16 @@ fn installTool(
     if (!force) {
         if (state.getVersion(t.id)) |installed_ver| {
             if (std.mem.eql(u8, installed_ver, version)) {
-                printBox(t.name, version);
-                printAlreadyReady(t.name);
+                printAlreadyReady(t.name, installed_ver);
                 return;
             }
         }
     }
 
-    // Print install box + summary
-    printBox(t.name, version);
-
     const os = platform.Os.current();
     const arch = platform.Arch.current();
 
-    const pkg_line = try std.fmt.allocPrint(allocator, "Package: {s} {s}", .{ t.id, version });
-    defer allocator.free(pkg_line);
-    const plat_line = try std.fmt.allocPrint(allocator, "Platform: {s}/{s}", .{ os.name(), arch.goName() });
-    defer allocator.free(plat_line);
-    const src_line = try std.fmt.allocPrint(allocator, "Source: {s}", .{t.homepage});
-    defer allocator.free(src_line);
-    printSummary(&.{ pkg_line, plat_line, src_line });
-
-    output.printStep("Pre-checks", output.SYM_OK, "Ready");
+    printInstallHeader(t.name, version, version_arg != null);
 
     // Brew install path: preferred when brew is available and tool declares a formula
     var used_brew = false;
@@ -336,7 +322,7 @@ fn installTool(
             if (section.items.len > 0) {
                 shell_mod.ensureSourced(sh, allocator) catch {};
                 shell_mod.addSection(sh, t.id, section.items, allocator) catch {};
-                output.printStep("Shell integration", output.SYM_OK, sh.name());
+                output.printStep("Shell", output.SYM_OK, sh.name());
             }
         }
     }
@@ -462,29 +448,11 @@ pub fn parseGroup(name: []const u8) ?tool_mod.Group {
 
 // ─── Install-specific print functions ─────────────────────────────────────────
 
-fn printBox(tool: []const u8, version: []const u8) void {
-    const inner = 48;
-    std.debug.print("{s}+", .{output.CYAN});
-    for (0..inner) |_| std.debug.print("-", .{});
-    std.debug.print("+{s}\n", .{output.RESET});
-
-    const title_len = tool.len + 1 + version.len + " Installation".len + 1;
-    const padding = if (inner > title_len + 2) inner - title_len - 2 else 0;
-    std.debug.print("{s}|{s} {s}{s}{s} {s} Installation", .{ output.CYAN, output.RESET, output.BOLD, tool, output.RESET, version });
-    for (0..padding) |_| std.debug.print(" ", .{});
-    std.debug.print(" {s}|{s}\n", .{ output.CYAN, output.RESET });
-
-    std.debug.print("{s}+", .{output.CYAN});
-    for (0..inner) |_| std.debug.print("-", .{});
-    std.debug.print("+{s}\n", .{output.RESET});
-}
-
-fn printSummary(items: []const []const u8) void {
-    std.debug.print("\n{s}{s}{s} {s}Summary:{s}\n", .{ output.CYAN, output.SYM_LIST, output.RESET, output.BOLD, output.RESET });
-    for (items) |item| {
-        std.debug.print("  • {s}\n", .{item});
-    }
-    std.debug.print("\n", .{});
+fn printInstallHeader(tool_name: []const u8, version: []const u8, pinned: bool) void {
+    const icon = if (pinned) output.SYM_PIN else output.SYM_INSTALL;
+    std.debug.print("\n{s} {s}Installing{s} {s} {s}\n\n", .{
+        icon, output.BOLD, output.RESET, tool_name, version,
+    });
 }
 
 fn printSuccess(tool: []const u8, duration_s: ?u64) void {
@@ -504,8 +472,8 @@ fn printPinnedSkip(tool: []const u8, version: []const u8) void {
     std.debug.print("   To upgrade anyway: dot install {s} --force\n", .{tool});
 }
 
-fn printAlreadyReady(tool: []const u8) void {
-    std.debug.print("\n{s}{s}{s} {s}{s}{s} ready!\n\n", .{ output.GREEN, output.SYM_CHECK, output.RESET, output.BOLD, tool, output.RESET });
+fn printAlreadyReady(tool: []const u8, version: []const u8) void {
+    std.debug.print("\n{s}{s}{s} {s}{s}{s} {s} — already up to date\n\n", .{ output.GREEN, output.SYM_CHECK, output.RESET, output.BOLD, tool, output.RESET, version });
 }
 
 fn printQuickStart(cmds: []const []const u8) void {
@@ -534,7 +502,7 @@ fn printSkipSystem(tool: []const u8, path: []const u8, sys_ver: []const u8, late
 }
 
 fn printFetchingVersion(name: []const u8) void {
-    std.debug.print("{s} Fetching latest version for {s}...\n", .{ output.SYM_SEARCH, name });
+    std.debug.print("{s} Fetching version for {s}...\n", .{ output.SYM_SEARCH, name });
 }
 
 fn printVersionFetchWarning(err_name: []const u8) void {

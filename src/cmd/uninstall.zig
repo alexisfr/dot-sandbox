@@ -89,7 +89,7 @@ pub fn run(
     const sh = platform.Shell.detect();
     if (sh != .unknown) {
         shell_mod.removeSection(sh, id, allocator) catch {};
-        output.printStep("Shell integration", output.SYM_OK, "removed");
+        output.printStep("Shell", output.SYM_OK, "removed");
     }
 
     // Update state
@@ -101,7 +101,7 @@ pub fn run(
 // ─── Uninstall-specific print functions ───────────────────────────────────────
 
 fn printToolUninstalled(id: []const u8) void {
-    std.debug.print("{s}{s}{s} {s} uninstalled\n", .{ output.GREEN, output.SYM_OK, output.RESET, id });
+    std.debug.print("\n{s}{s}{s} {s}{s}{s} uninstalled\n\n", .{ output.GREEN, output.SYM_CHECK, output.RESET, output.BOLD, id, output.RESET });
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

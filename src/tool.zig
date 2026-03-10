@@ -202,7 +202,7 @@ pub const InstallStrategy = union(enum) {
             const extract_dir = try std.fs.path.join(ctx.allocator, &.{ ctx.tmp_dir, "extract" });
             defer ctx.allocator.free(extract_dir);
 
-            output.printStep("Extracting", output.SYM_ARROW, filename);
+            output.printStepStart("Extracting", filename);
             if (std.mem.endsWith(u8, archive_path, ".tar.gz") or
                 std.mem.endsWith(u8, archive_path, ".tgz"))
             {
@@ -210,6 +210,7 @@ pub const InstallStrategy = union(enum) {
             } else if (std.mem.endsWith(u8, archive_path, ".zip")) {
                 try archive.extractZip(archive_path, extract_dir);
             }
+            output.printStepDone("Extracting", filename);
 
             // Locate the binary in the extracted tree
             const bin_subpath = try renderTemplate(ctx.allocator, self.binary_in_archive, ctx);
@@ -271,8 +272,10 @@ pub const InstallStrategy = union(enum) {
             const extract_dir = try std.fmt.allocPrint(ctx.allocator, "{s}/extract", .{ctx.tmp_dir});
             defer ctx.allocator.free(extract_dir);
 
-            output.printStep("Extracting", output.SYM_ARROW, std.fs.path.basename(archive_path));
+            const hc_filename = std.fs.path.basename(archive_path);
+            output.printStepStart("Extracting", hc_filename);
             try archive.extractZip(archive_path, extract_dir);
+            output.printStepDone("Extracting", hc_filename);
 
             const src_bin = try std.fs.path.join(ctx.allocator, &.{ extract_dir, self.product });
             defer ctx.allocator.free(src_bin);
@@ -410,7 +413,7 @@ pub const InstallStrategy = union(enum) {
             const extract_dir = try std.fmt.allocPrint(ctx.allocator, "{s}/extract", .{ctx.tmp_dir});
             defer ctx.allocator.free(extract_dir);
 
-            output.printStep("Extracting", output.SYM_ARROW, filename);
+            output.printStepStart("Extracting", filename);
             if (std.mem.endsWith(u8, archive_path, ".tar.gz") or
                 std.mem.endsWith(u8, archive_path, ".tgz"))
             {
@@ -418,6 +421,7 @@ pub const InstallStrategy = union(enum) {
             } else if (std.mem.endsWith(u8, archive_path, ".zip")) {
                 try archive.extractZip(archive_path, extract_dir);
             }
+            output.printStepDone("Extracting", filename);
 
             if (self.install_script) |script| {
                 const script_path = try std.fs.path.join(ctx.allocator, &.{ extract_dir, script });

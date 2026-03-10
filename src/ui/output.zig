@@ -39,6 +39,7 @@ pub fn initCaps() void {
         SYM_SEARCH = "[..]";
         SYM_DASH = "-";
         SYM_ARROW = "->";
+        SYM_INSTALL = "[IN]";
     }
 }
 
@@ -79,6 +80,8 @@ pub var SYM_SEARCH: []const u8 = "🔍";
 pub var SYM_DASH: []const u8 = "─";
 /// Progress/in-flight indicator: "→" in rich mode, "->" in plain/pipe.
 pub var SYM_ARROW: []const u8 = "→";
+/// Install action indicator: "🔧" in rich mode, "[IN]" in plain/pipe.
+pub var SYM_INSTALL: []const u8 = "🔧";
 
 // ─── Common print functions ───────────────────────────────────────────────────
 
@@ -160,20 +163,46 @@ pub fn printStep(step: []const u8, status: []const u8, detail: []const u8) void 
     else
         DIM;
 
-    std.debug.print("{s} {s}{s:<22}{s} [{s}{s}{s}] {s}\n", .{
-        prefix, CYAN, step, RESET, color, status, RESET, detail,
-    });
+    if (detail.len > 0) {
+        std.debug.print("{s} {s}{s:<14}{s}  {s}{s}{s}  {s}\n", .{
+            prefix, BOLD, step, RESET, color, status, RESET, detail,
+        });
+    } else {
+        std.debug.print("{s} {s}{s:<14}{s}  {s}{s}{s}\n", .{
+            prefix, BOLD, step, RESET, color, status, RESET,
+        });
+    }
+}
+
+/// Print an in-progress step indicator that stays on the current line (no newline).
+/// Follow with printStepDone() to overwrite it with the completed state.
+/// In pipe/silent mode: no-op — printStepDone() will print the single final line.
+pub fn printStepStart(step: []const u8, detail: []const u8) void {
+    if (render_mode == .silent or render_mode == .pipe) return;
+    const prefix = stepPrefix(step);
+    std.debug.print("{s} {s}{s:<14}{s}  {s}…{s}  {s}", .{
+        prefix, BOLD, step, RESET, DIM, RESET, detail,
+    }); // intentionally no \n — cursor stays on this line
+}
+
+/// Complete a step started with printStepStart(), overwriting the in-progress line.
+/// In pipe mode: prints the step as a normal completed line (no in-progress line was shown).
+pub fn printStepDone(step: []const u8, detail: []const u8) void {
+    if (render_mode == .silent) return;
+    switch (render_mode) {
+        .rich => std.debug.print("\r\x1b[2K", .{}),
+        .plain => std.debug.print("\r{s:<80}\r", .{""}),
+        .pipe, .silent => {},
+    }
+    printStep(step, SYM_OK, detail);
 }
 
 // ─── Install progress (called from strategy execute() in tool.zig) ────────────
 
-/// In pipe mode: prints a step line with the URL basename so CI logs show progress.
-/// In rich/plain mode: no-op because the ProgressBar handles display.
+/// No-op: the ProgressBar handles all downloading feedback in every mode.
+/// bar.finish() in pipe mode prints the single completion line.
 pub fn printDownloading(url: []const u8) void {
-    if (render_mode == .pipe) {
-        const basename = std.fs.path.basename(url);
-        printStep("Downloading", SYM_ARROW, basename);
-    }
+    _ = url;
 }
 
 /// No-op: install.zig's printStep("Installation", ...) shows the path instead.

@@ -54,9 +54,14 @@ pub const ProgressBar = struct {
         const prefix: []const u8 = if (mode == .rich) "📥" else "[DL]";
 
         // Build the complete bar line into a stack buffer, then write it in one shot.
+        // Prefix with \r to return to column 0; in rich mode also erase to end-of-line
+        // (\x1b[2K) so that when done_str shrinks (e.g. KB→MB transition) no stale
+        // characters remain visible.
         var buf: [512]u8 = undefined;
         var fbs = std.io.fixedBufferStream(&buf);
         const w = fbs.writer();
+
+        const line_start: []const u8 = if (mode == .rich) "\r\x1b[2K" else "\r";
 
         if (total) |t| {
             const pct: u64 = if (t > 0) @min(current * 100 / t, 100) else 0;
@@ -68,9 +73,13 @@ pub const ProgressBar = struct {
             const done_str = fmtBytes(current, &done_buf);
             const total_str = fmtBytes(t, &total_buf);
 
-            w.print("\r{s} {s}{s:<22}{s} [{s}{s}{s}] [", .{
-                prefix, output.CYAN, self.step, output.RESET,
-                output.YELLOW, output.SYM_ARROW, output.RESET,
+            const is_done = current >= t;
+            const status_sym = if (is_done) output.SYM_OK else output.SYM_ARROW;
+            const status_color = if (is_done) output.GREEN else output.YELLOW;
+
+            w.print("{s}{s} {s}{s:<14}{s} [{s}{s}{s}] [", .{
+                line_start, prefix, output.CYAN, self.step, output.RESET,
+                status_color, status_sym, output.RESET,
             }) catch return;
             for (0..filled) |_| w.writeAll(fill) catch return;
             for (0..n_empty) |_| w.writeAll(empty_ch) catch return;
@@ -79,8 +88,8 @@ pub const ProgressBar = struct {
             var done_buf: [32]u8 = undefined;
             const done_str = fmtBytes(current, &done_buf);
 
-            w.print("\r{s} {s}{s:<22}{s} [{s}{s}{s}] [", .{
-                prefix, output.CYAN, self.step, output.RESET,
+            w.print("{s}{s} {s}{s:<14}{s} [{s}{s}{s}] [", .{
+                line_start, prefix, output.CYAN, self.step, output.RESET,
                 output.YELLOW, output.SYM_ARROW, output.RESET,
             }) catch return;
             for (0..self.width) |_| w.writeAll(fill) catch return;
@@ -106,9 +115,12 @@ pub const ProgressBar = struct {
                 const detail = fmtBytes(final_bytes, &bytes_buf);
                 output.printStep(self.step, output.SYM_OK, detail);
             },
-            .plain, .rich => {
-                // Lock the bar at its current state by moving to the next line.
-                // Only emit \n if the bar was actually drawn; otherwise stay silent.
+            .rich => {
+                // Erase any stale trailing characters from a previously-longer
+                // frame, then lock the bar in place.
+                if (self.rendered) std.debug.print("\x1b[K\n", .{});
+            },
+            .plain => {
                 if (self.rendered) std.debug.print("\n", .{});
             },
         }
