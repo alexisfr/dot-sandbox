@@ -16,10 +16,13 @@ pub fn main() !void {
 test {
     _ = @import("platform.zig");
     _ = @import("tool.zig");
+    _ = @import("archive.zig");
     _ = @import("repository/loader.zig");
     _ = @import("validate.zig");
     _ = @import("state.zig");
     _ = @import("shell.zig");
+    _ = @import("ui/output.zig");
+    _ = @import("ui/progress.zig");
     _ = @import("cmd/install.zig");
     _ = @import("cmd/upgrade.zig");
     _ = @import("cmd/uninstall.zig");

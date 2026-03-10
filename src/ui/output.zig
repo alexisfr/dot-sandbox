@@ -2,7 +2,13 @@ const std = @import("std");
 
 // ─── Render mode ──────────────────────────────────────────────────────────────
 
-pub const RenderMode = enum { rich, plain, pipe };
+pub const RenderMode = enum {
+    rich,
+    plain,
+    pipe,
+    /// Used in tests to suppress all output while still exercising logic.
+    silent,
+};
 
 var render_mode: RenderMode = .rich;
 
@@ -38,6 +44,11 @@ pub fn initCaps() void {
 
 pub fn getRenderMode() RenderMode {
     return render_mode;
+}
+
+/// For tests only: override render mode without reading environment/TTY.
+pub fn setRenderModeForTesting(mode: RenderMode) void {
+    render_mode = mode;
 }
 
 // ─── ANSI codes ───────────────────────────────────────────────────────────────
@@ -97,20 +108,23 @@ pub fn printUnknownTool(id: []const u8) void {
 
 // ─── Step progress (shared by install and uninstall commands) ─────────────────
 
-fn stepPrefix(step: []const u8) []const u8 {
-    if (render_mode == .rich) {
-        if (std.mem.startsWith(u8, step, "Pre-check")) return SYM_SEARCH;
+/// Pure mapping from step name to its icon/prefix for a given render mode.
+/// Exported so tests can verify the mapping without depending on global state.
+pub fn stepPrefixForMode(step: []const u8, mode: RenderMode) []const u8 {
+    if (mode == .rich) {
+        if (std.mem.startsWith(u8, step, "Pre-check")) return "🔍";
         if (std.mem.startsWith(u8, step, "Download")) return "📥";
         if (std.mem.startsWith(u8, step, "Verif")) return "🔐";
         if (std.mem.startsWith(u8, step, "Extract")) return "📦";
         if (std.mem.startsWith(u8, step, "Install")) return "🔧";
-        if (std.mem.startsWith(u8, step, "Status")) return SYM_PIN;
+        if (std.mem.startsWith(u8, step, "Status")) return "📌";
         if (std.mem.startsWith(u8, step, "Shell")) return "🐚";
         if (std.mem.startsWith(u8, step, "Config")) return "⚙️ ";
-        if (std.mem.startsWith(u8, step, "Link")) return SYM_LINK;
-        if (std.mem.startsWith(u8, step, "Valid")) return SYM_CHECK;
+        if (std.mem.startsWith(u8, step, "Link")) return "🔗";
+        if (std.mem.startsWith(u8, step, "Valid")) return "✅";
         if (std.mem.startsWith(u8, step, "Cleanup")) return "🧹";
         if (std.mem.startsWith(u8, step, "Brew")) return "🍺";
+        if (std.mem.startsWith(u8, step, "Post-")) return "🔄";
         return "• ";
     } else {
         if (std.mem.startsWith(u8, step, "Pre-check")) return "[..]";
@@ -125,11 +139,17 @@ fn stepPrefix(step: []const u8) []const u8 {
         if (std.mem.startsWith(u8, step, "Valid")) return "[OK]";
         if (std.mem.startsWith(u8, step, "Cleanup")) return "[CL]";
         if (std.mem.startsWith(u8, step, "Brew")) return "[BR]";
+        if (std.mem.startsWith(u8, step, "Post-")) return "[PO]";
         return "[--]";
     }
 }
 
+fn stepPrefix(step: []const u8) []const u8 {
+    return stepPrefixForMode(step, render_mode);
+}
+
 pub fn printStep(step: []const u8, status: []const u8, detail: []const u8) void {
+    if (render_mode == .silent) return;
     const prefix = stepPrefix(step);
     const color = if (std.mem.eql(u8, status, SYM_OK))
         GREEN
@@ -175,4 +195,54 @@ pub fn printNoPackageManager(pm_name: []const u8) void {
 
 pub fn printDetail(msg: []const u8) void {
     std.debug.print("   {s}\n", .{msg});
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+test "stepPrefixForMode: rich mode step names" {
+    try std.testing.expectEqualStrings("🔍", stepPrefixForMode("Pre-checks", .rich));
+    try std.testing.expectEqualStrings("📥", stepPrefixForMode("Downloading", .rich));
+    try std.testing.expectEqualStrings("🔐", stepPrefixForMode("Verifying", .rich));
+    try std.testing.expectEqualStrings("📦", stepPrefixForMode("Extracting", .rich));
+    try std.testing.expectEqualStrings("🔧", stepPrefixForMode("Installation", .rich));
+    try std.testing.expectEqualStrings("📌", stepPrefixForMode("Status", .rich));
+    try std.testing.expectEqualStrings("🐚", stepPrefixForMode("Shell integration", .rich));
+    try std.testing.expectEqualStrings("⚙️ ", stepPrefixForMode("Config", .rich));
+    try std.testing.expectEqualStrings("🔗", stepPrefixForMode("Link", .rich));
+    try std.testing.expectEqualStrings("✅", stepPrefixForMode("Validation", .rich));
+    try std.testing.expectEqualStrings("🧹", stepPrefixForMode("Cleanup", .rich));
+    try std.testing.expectEqualStrings("🍺", stepPrefixForMode("Brew", .rich));
+    try std.testing.expectEqualStrings("🔄", stepPrefixForMode("Post-install", .rich));
+    try std.testing.expectEqualStrings("• ", stepPrefixForMode("Unknown step", .rich));
+}
+
+test "stepPrefixForMode: plain mode step names" {
+    try std.testing.expectEqualStrings("[..]", stepPrefixForMode("Pre-checks", .plain));
+    try std.testing.expectEqualStrings("[DL]", stepPrefixForMode("Downloading", .plain));
+    try std.testing.expectEqualStrings("[VF]", stepPrefixForMode("Verifying", .plain));
+    try std.testing.expectEqualStrings("[EX]", stepPrefixForMode("Extracting", .plain));
+    try std.testing.expectEqualStrings("[IN]", stepPrefixForMode("Installation", .plain));
+    try std.testing.expectEqualStrings("[PI]", stepPrefixForMode("Status", .plain));
+    try std.testing.expectEqualStrings("[SH]", stepPrefixForMode("Shell integration", .plain));
+    try std.testing.expectEqualStrings("[CF]", stepPrefixForMode("Config", .plain));
+    try std.testing.expectEqualStrings("[LK]", stepPrefixForMode("Link", .plain));
+    try std.testing.expectEqualStrings("[OK]", stepPrefixForMode("Validation", .plain));
+    try std.testing.expectEqualStrings("[CL]", stepPrefixForMode("Cleanup", .plain));
+    try std.testing.expectEqualStrings("[BR]", stepPrefixForMode("Brew", .plain));
+    try std.testing.expectEqualStrings("[PO]", stepPrefixForMode("Post-install", .plain));
+    try std.testing.expectEqualStrings("[--]", stepPrefixForMode("Unknown step", .plain));
+}
+
+test "stepPrefixForMode: pipe mode uses same prefixes as plain" {
+    // Pipe mode has no TTY so must not emit emoji
+    try std.testing.expectEqualStrings("[DL]", stepPrefixForMode("Downloading", .pipe));
+    try std.testing.expectEqualStrings("[IN]", stepPrefixForMode("Installation", .pipe));
+    try std.testing.expectEqualStrings("[--]", stepPrefixForMode("Unknown", .pipe));
+}
+
+test "stepPrefixForMode: prefix matching is prefix not exact" {
+    // Verifies we match on startsWith, not equality
+    try std.testing.expectEqualStrings("📥", stepPrefixForMode("Downloading helm", .rich));
+    try std.testing.expectEqualStrings("[DL]", stepPrefixForMode("Downloading helm", .plain));
+    try std.testing.expectEqualStrings("🔧", stepPrefixForMode("Installation complete", .rich));
 }

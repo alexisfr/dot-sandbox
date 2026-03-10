@@ -28,7 +28,8 @@ pub const ProgressBar = struct {
         self.bytes_done = current;
         self.bytes_total = total;
 
-        if (output.getRenderMode() != .pipe) {
+        const mode = output.getRenderMode();
+        if (mode == .rich or mode == .plain) {
             const now = std.time.milliTimestamp();
             const at_100 = if (total) |t| current >= t else false;
             // Always draw at 100%; otherwise throttle to REDRAW_INTERVAL_MS.
@@ -97,6 +98,7 @@ pub const ProgressBar = struct {
         self.finished = true;
 
         switch (output.getRenderMode()) {
+            .silent => {},
             .pipe => {
                 // Pipe: print a completion step line (no bar was drawn)
                 var bytes_buf: [32]u8 = undefined;
@@ -125,4 +127,88 @@ pub fn fmtBytes(bytes: u64, buf: []u8) []const u8 {
     } else {
         return std.fmt.bufPrint(buf, "{d} B", .{bytes}) catch "???";
     }
+}
+
+// ─── Tests ────────────────────────────────────────────────────────────────────
+
+test "fmtBytes: byte range" {
+    var buf: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("0 B", fmtBytes(0, &buf));
+    try std.testing.expectEqualStrings("1 B", fmtBytes(1, &buf));
+    try std.testing.expectEqualStrings("1023 B", fmtBytes(1023, &buf));
+}
+
+test "fmtBytes: kilobyte range" {
+    var buf: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("1.0 KB", fmtBytes(1024, &buf));
+    try std.testing.expectEqualStrings("1.5 KB", fmtBytes(1536, &buf));
+    try std.testing.expectEqualStrings("10.0 KB", fmtBytes(10240, &buf));
+    // Boundary: one byte below 1 MB
+    try std.testing.expectEqualStrings("1023.9 KB", fmtBytes(1024 * 1024 - 1, &buf));
+}
+
+test "fmtBytes: megabyte range" {
+    var buf: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("1.0 MB", fmtBytes(1024 * 1024, &buf));
+    try std.testing.expectEqualStrings("15.2 MB", fmtBytes(15 * 1024 * 1024 + 256 * 1024, &buf));
+    try std.testing.expectEqualStrings("100.0 MB", fmtBytes(100 * 1024 * 1024, &buf));
+}
+
+test "ProgressBar: update stores bytes" {
+    output.setRenderModeForTesting(.silent);
+    defer output.setRenderModeForTesting(.rich);
+    var bar = ProgressBar{ .step = "Test" };
+    bar.update(1024, 10240, "");
+    try std.testing.expectEqual(@as(u64, 1024), bar.bytes_done);
+    try std.testing.expectEqual(@as(?u64, 10240), bar.bytes_total);
+    try std.testing.expect(!bar.finished);
+}
+
+test "ProgressBar: auto-finish triggers at 100%" {
+    output.setRenderModeForTesting(.silent);
+    defer output.setRenderModeForTesting(.rich);
+    var bar = ProgressBar{ .step = "Test" };
+    bar.update(50, 100, "");
+    try std.testing.expect(!bar.finished);
+    bar.update(100, 100, "");
+    try std.testing.expect(bar.finished);
+}
+
+test "ProgressBar: auto-finish triggers when current exceeds total" {
+    output.setRenderModeForTesting(.silent);
+    defer output.setRenderModeForTesting(.rich);
+    var bar = ProgressBar{ .step = "Test" };
+    // Simulate final callback with total = bytes_done (unknown content-length path)
+    bar.update(27_000_000, 27_000_000, "");
+    try std.testing.expect(bar.finished);
+    try std.testing.expectEqual(@as(u64, 27_000_000), bar.bytes_done);
+}
+
+test "ProgressBar: update is no-op after finish" {
+    output.setRenderModeForTesting(.silent);
+    defer output.setRenderModeForTesting(.rich);
+    var bar = ProgressBar{ .step = "Test" };
+    bar.update(100, 100, "");
+    try std.testing.expect(bar.finished);
+    // Further updates must not change bytes_done
+    bar.update(200, 200, "");
+    try std.testing.expectEqual(@as(u64, 100), bar.bytes_done);
+}
+
+test "ProgressBar: explicit finish is idempotent" {
+    output.setRenderModeForTesting(.silent);
+    defer output.setRenderModeForTesting(.rich);
+    var bar = ProgressBar{ .step = "Test" };
+    bar.finish();
+    bar.finish(); // must not panic
+    try std.testing.expect(bar.finished);
+}
+
+test "ProgressBar: finish without any update leaves rendered=false" {
+    output.setRenderModeForTesting(.silent);
+    defer output.setRenderModeForTesting(.rich);
+    var bar = ProgressBar{ .step = "Test" };
+    try std.testing.expect(!bar.rendered);
+    bar.finish();
+    try std.testing.expect(!bar.rendered);
 }
