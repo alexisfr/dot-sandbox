@@ -79,7 +79,7 @@ fn printAvailableGroups(tools: []const tool_mod.Tool) void {
         }
     }
 
-    std.debug.print("Groups: ", .{});
+    std.debug.print("\nGroups: ", .{});
     var shown: usize = 0;
     inline for (std.meta.fields(tool_mod.Group)) |field| {
         if (shown >= max_groups) break;
@@ -115,8 +115,12 @@ pub fn run(
 
     const parsed = parseInstallArgs(args);
 
-    if (parsed.group_mode) {
-        try installGroup(allocator, parsed.group_name, parsed.force, state, tools);
+    const is_group_name = std.mem.eql(u8, parsed.tool_name, "all") or
+        parseGroup(parsed.tool_name) != null;
+
+    if (parsed.group_mode or (!parsed.group_mode and is_group_name)) {
+        const grp = if (parsed.group_mode) parsed.group_name else parsed.tool_name;
+        try installGroup(allocator, grp, parsed.force, state, tools);
     } else if (parsed.tool_name.len > 0) {
         if (!validate.isValidToolId(parsed.tool_name)) {
             output.printError("invalid tool name");
@@ -195,6 +199,9 @@ fn installTool(
     }
     const t = found orelse {
         output.printUnknownTool(id);
+        if (closestTool(id, tools)) |suggestion| {
+            std.debug.print("Did you mean '{s}'?\n", .{suggestion});
+        }
         return;
     };
 
@@ -207,13 +214,9 @@ fn installTool(
         version_owned = true;
     } else {
         printFetchingVersion(t.name);
-        version = t.version_source.resolve(allocator) catch |e| {
+        version = t.version_source.resolve(allocator) catch |e| blk: {
             printVersionFetchWarning(@errorName(e));
-            version = try allocator.dupe(u8, "latest");
-            version_owned = true;
-            // avoid double-set below
-            version_owned = true;
-            return; // fallback handled above
+            break :blk try allocator.dupe(u8, "latest");
         };
         version_owned = true;
     }
@@ -223,7 +226,7 @@ fn installTool(
     if (!force and version_arg == null) {
         if (state.isPinned(t.id)) {
             const pinned_ver = state.getVersion(t.id) orelse "pinned";
-            printPinnedSkip(t.name, pinned_ver);
+            printPinnedSkip(t.name, t.id, pinned_ver);
             return;
         }
     }
@@ -467,9 +470,9 @@ fn printSuccess(tool: []const u8, duration_s: ?u64) void {
     }
 }
 
-fn printPinnedSkip(tool: []const u8, version: []const u8) void {
-    std.debug.print("{s}{s}{s} {s}{s}{s} is pinned at {s} — skipping\n", .{ output.CYAN, output.SYM_PIN, output.RESET, output.BOLD, tool, output.RESET, version });
-    std.debug.print("   To upgrade anyway: dot install {s} --force\n", .{tool});
+fn printPinnedSkip(tool_name: []const u8, tool_id: []const u8, version: []const u8) void {
+    std.debug.print("{s}{s}{s} {s}{s}{s} is pinned at {s} — skipping\n", .{ output.CYAN, output.SYM_PIN, output.RESET, output.BOLD, tool_name, output.RESET, version });
+    std.debug.print("   To upgrade anyway: dot install {s} --force\n", .{tool_id});
 }
 
 fn printAlreadyReady(tool: []const u8, version: []const u8) void {
@@ -522,6 +525,42 @@ fn printGroupBanner(group_name: []const u8, count: usize) void {
     std.debug.print("Installing group '{s}' ({d} tools)...\n\n", .{ group_name, count });
 }
 
+
+// ─── Fuzzy match ──────────────────────────────────────────────────────────────
+
+/// Single-row Levenshtein distance. Capped at max_len to bound stack use.
+fn editDistance(a: []const u8, b: []const u8) usize {
+    const max_len = 48;
+    var row: [max_len + 1]usize = undefined;
+    const la = @min(a.len, max_len);
+    const lb = @min(b.len, max_len);
+    for (0..lb + 1) |j| row[j] = j;
+    for (0..la) |i| {
+        var diag = row[0];
+        row[0] = i + 1;
+        for (0..lb) |j| {
+            const above = row[j + 1];
+            const cost: usize = if (a[i] == b[j]) 0 else 1;
+            row[j + 1] = @min(row[j] + 1, @min(above + 1, diag + cost));
+            diag = above;
+        }
+    }
+    return row[lb];
+}
+
+/// Return the closest tool id if within edit distance 2, otherwise null.
+fn closestTool(id: []const u8, tools: []const tool_mod.Tool) ?[]const u8 {
+    var best: ?[]const u8 = null;
+    var best_dist: usize = 3; // threshold: suggest only if dist < 3
+    for (tools) |t| {
+        const d = editDistance(id, t.id);
+        if (d < best_dist) {
+            best_dist = d;
+            best = t.id;
+        }
+    }
+    return best;
+}
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 

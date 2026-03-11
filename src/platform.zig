@@ -181,12 +181,12 @@ pub const PackageManager = enum {
     /// Install command prefix (without package name)
     pub fn installArgs(self: PackageManager) []const []const u8 {
         return switch (self) {
-            .pacman => &.{ "pacman", "-S", "--noconfirm" },
-            .apt => &.{ "apt-get", "install", "-y" },
-            .dnf => &.{ "dnf", "install", "-y" },
-            .yum => &.{ "yum", "install", "-y" },
-            .zypper => &.{ "zypper", "install", "-y" },
-            .apk => &.{ "apk", "add" },
+            .pacman => &.{ "sudo", "pacman", "-S", "--noconfirm" },
+            .apt => &.{ "sudo", "apt-get", "install", "-y" },
+            .dnf => &.{ "sudo", "dnf", "install", "-y" },
+            .yum => &.{ "sudo", "yum", "install", "-y" },
+            .zypper => &.{ "sudo", "zypper", "install", "-y" },
+            .apk => &.{ "sudo", "apk", "add" },
             .brew => &.{ "brew", "install" },
             .flatpak => &.{ "flatpak", "install", "-y" },
             .snap => &.{ "snap", "install" },

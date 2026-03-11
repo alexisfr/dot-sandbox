@@ -6,10 +6,14 @@
       "id": "helm",
       "name": "Helm",
       "description": "The Kubernetes Package Manager",
-      "groups": ["k8s"],
+      "groups": [
+        "k8s"
+      ],
       "homepage": "https://helm.sh",
       "brew_formula": "helm",
-      "aliases": ["h"],
+      "aliases": [
+        "h"
+      ],
       "version_source": {
         "type": "github_release",
         "repo": "helm/helm",
@@ -41,10 +45,14 @@
       "id": "kubectl",
       "name": "kubectl",
       "description": "The Kubernetes command-line tool",
-      "groups": ["k8s"],
+      "groups": [
+        "k8s"
+      ],
       "homepage": "https://kubernetes.io/docs/reference/kubectl/",
       "brew_formula": "kubernetes-cli",
-      "aliases": ["k"],
+      "aliases": [
+        "k"
+      ],
       "version_source": {
         "type": "k8s_stable_txt"
       },
@@ -62,7 +70,9 @@
       "id": "k9s",
       "name": "k9s",
       "description": "Terminal UI to interact with Kubernetes clusters",
-      "groups": ["k8s"],
+      "groups": [
+        "k8s"
+      ],
       "homepage": "https://k9scli.io",
       "brew_formula": "k9s",
       "version_source": {
@@ -79,7 +89,9 @@
       "id": "kubelogin",
       "name": "kubelogin",
       "description": "Kubernetes credential plugin for Azure/AAD authentication",
-      "groups": ["k8s"],
+      "groups": [
+        "k8s"
+      ],
       "homepage": "https://github.com/Azure/kubelogin",
       "brew_formula": "int128/kubelogin/kubelogin",
       "version_source": {
@@ -96,10 +108,14 @@
       "id": "terraform",
       "name": "Terraform",
       "description": "Infrastructure as Code tool by HashiCorp",
-      "groups": ["iac"],
+      "groups": [
+        "iac"
+      ],
       "homepage": "https://www.terraform.io",
       "brew_formula": "hashicorp/tap/terraform",
-      "aliases": ["tf"],
+      "aliases": [
+        "tf"
+      ],
       "version_source": {
         "type": "hashicorp",
         "product": "terraform"
@@ -118,7 +134,9 @@
       "id": "vault",
       "name": "Vault",
       "description": "Secrets management tool by HashiCorp",
-      "groups": ["iac"],
+      "groups": [
+        "iac"
+      ],
       "homepage": "https://www.vaultproject.io",
       "brew_formula": "hashicorp/tap/vault",
       "version_source": {
@@ -139,7 +157,9 @@
       "id": "jq",
       "name": "jq",
       "description": "Lightweight and flexible command-line JSON processor",
-      "groups": ["utils"],
+      "groups": [
+        "utils"
+      ],
       "homepage": "https://jqlang.github.io/jq/",
       "brew_formula": "jq",
       "version_source": {
@@ -156,7 +176,9 @@
       "id": "gh",
       "name": "GitHub CLI",
       "description": "GitHub's official command line tool",
-      "groups": ["utils"],
+      "groups": [
+        "utils"
+      ],
       "homepage": "https://cli.github.com",
       "brew_formula": "gh",
       "version_source": {
@@ -178,7 +200,9 @@
       "id": "btop",
       "name": "btop",
       "description": "Resource monitor that shows usage and stats for CPU, memory, disk and network",
-      "groups": ["utils"],
+      "groups": [
+        "utils"
+      ],
       "homepage": "https://github.com/aristocratos/btop",
       "version_source": {
         "type": "github_release",
@@ -197,7 +221,9 @@
       "id": "podman",
       "name": "Podman",
       "description": "Daemonless container engine for OCI containers",
-      "groups": ["containers"],
+      "groups": [
+        "containers"
+      ],
       "homepage": "https://podman.io",
       "version_source": {
         "type": "github_release",
@@ -215,16 +241,19 @@
       "id": "aws",
       "name": "AWS CLI",
       "description": "Unified command line interface for Amazon Web Services",
-      "groups": ["cloud"],
+      "groups": [
+        "cloud"
+      ],
       "homepage": "https://aws.amazon.com/cli/",
       "brew_formula": "awscli",
       "version_source": {
         "type": "github_release",
-        "repo": "aws/aws-cli"
+        "repo": "aws/aws-cli",
+        "filter": "2."
       },
       "strategy": {
         "type": "tarball",
-        "url_template": "https://awscli.amazonaws.com/awscli-exe-{os}-{arch}.zip",
+        "url_template": "https://awscli.amazonaws.com/awscli-exe-{os}-{arch_uname}.zip",
         "strip_components": 0,
         "install_script": "aws/install"
       }
@@ -233,7 +262,9 @@
       "id": "gcloud",
       "name": "Google Cloud SDK",
       "description": "Command line tools for Google Cloud Platform",
-      "groups": ["cloud"],
+      "groups": [
+        "cloud"
+      ],
       "homepage": "https://cloud.google.com/sdk",
       "version_source": {
         "type": "static",
@@ -241,7 +272,7 @@
       },
       "strategy": {
         "type": "tarball",
-        "url_template": "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-{os}-{arch}.tar.gz",
+        "url_template": "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-{os}-{arch_uname}.tar.gz",
         "strip_components": 1,
         "install_script": "install.sh"
       },
@@ -255,7 +286,9 @@
       "id": "oci",
       "name": "OCI CLI",
       "description": "Command line interface for Oracle Cloud Infrastructure",
-      "groups": ["cloud"],
+      "groups": [
+        "cloud"
+      ],
       "homepage": "https://docs.oracle.com/en-us/iaas/tools/oci-cli/latest/",
       "brew_formula": "oci-cli",
       "version_source": {
@@ -273,7 +306,9 @@
       "id": "starship",
       "name": "Starship",
       "description": "The minimal, blazing-fast, and infinitely customizable prompt for any shell",
-      "groups": ["terminal"],
+      "groups": [
+        "terminal"
+      ],
       "homepage": "https://starship.rs",
       "brew_formula": "starship",
       "version_source": {
@@ -282,7 +317,7 @@
       },
       "strategy": {
         "type": "github_release",
-        "url_template": "https://github.com/starship/starship/releases/download/v{version}/starship-{arch}-unknown-{os}-musl.tar.gz",
+        "url_template": "https://github.com/starship/starship/releases/download/v{version}/starship-{arch_uname}-unknown-{os}-musl.tar.gz",
         "binary_in_archive": "starship"
       },
       "shell_completions": {

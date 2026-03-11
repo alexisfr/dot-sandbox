@@ -309,16 +309,15 @@ pub const InstallStrategy = union(enum) {
             try argv.appendSlice(ctx.allocator, install_args);
             try argv.append(ctx.allocator, pkg_name);
 
-            output.printRunningCmd(install_args[0], pkg_name);
+            output.printRunningCmd(pm.command() orelse "unknown", pkg_name);
 
-            const result = try std.process.Child.run(.{
-                .allocator = ctx.allocator,
-                .argv = argv.items,
-            });
-            defer ctx.allocator.free(result.stdout);
-            defer ctx.allocator.free(result.stderr);
+            // Use spawn+wait (not run) so stdin/stdout/stderr are inherited —
+            // this lets sudo reach the TTY to prompt for a password.
+            var child = std.process.Child.init(argv.items, ctx.allocator);
+            try child.spawn();
+            const term = try child.wait();
 
-            if (result.term.Exited != 0) {
+            if (term != .Exited or term.Exited != 0) {
                 output.printDetail("Package install failed");
                 return error.PackageInstallFailed;
             }
@@ -550,6 +549,8 @@ pub fn renderTemplate(allocator: std.mem.Allocator, tmpl: []const u8, ctx: *cons
                 ctx.os.name()
             else if (std.mem.eql(u8, key, "arch"))
                 ctx.arch.goName()
+            else if (std.mem.eql(u8, key, "arch_uname"))
+                ctx.arch.unameName()
             else
                 tmpl[i .. i + end + 1]; // keep unchanged
 
