@@ -90,13 +90,13 @@ pub fn run(
 
         const maybe_entry = state.tools.get(t.id);
         const version: ?[]const u8 = if (maybe_entry) |e| e.version else null;
-        printListRow(t.id, t.aliases, t.description, version, groups_str.getWritten(), desc_width);
+        const sys = if (version == null) isSystemInstalled(allocator, t.id) else false;
+        printListRow(t.id, t.aliases, t.description, version, sys, groups_str.getWritten(), desc_width);
         count += 1;
     }
 
     const filter_name: ?[]const u8 = if (group_filter) |gf| @tagName(gf) else null;
     printListFooter(count, filter_name);
-    _ = allocator;
 }
 
 // ─── List-specific print functions ────────────────────────────────────────────
@@ -124,7 +124,20 @@ fn truncDesc(desc: []const u8, max_visual: usize, buf: []u8) struct { str: []con
     return .{ .str = buf[0 .. cut + 3], .visual = cut + 1 };
 }
 
-fn printListRow(id: []const u8, aliases: []const []const u8, desc: []const u8, version: ?[]const u8, groups: []const u8, desc_width: usize) void {
+/// Returns true if the tool binary is found in PATH outside ~/.local/bin.
+fn isSystemInstalled(allocator: std.mem.Allocator, id: []const u8) bool {
+    const result = std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "which", id },
+    }) catch return false;
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (result.term != .Exited or result.term.Exited != 0) return false;
+    const path = std.mem.trim(u8, result.stdout, " \n\r\t");
+    return path.len > 0 and !std.mem.containsAtLeast(u8, path, 1, ".local/bin");
+}
+
+fn printListRow(id: []const u8, aliases: []const []const u8, desc: []const u8, version: ?[]const u8, sys: bool, groups: []const u8, desc_width: usize) void {
     // id column: "kubectl" or "kubectl (k)" dimmed, padded to COL_ID visual chars
     const id_trunc = id[0..@min(id.len, COL_ID)];
     if (aliases.len > 0) {
@@ -153,6 +166,8 @@ fn printListRow(id: []const u8, aliases: []const []const u8, desc: []const u8, v
     if (version) |v| {
         const v_trunc = v[0..@min(v.len, 12)];
         std.debug.print("{s}{s} {s:<12}{s} ", .{ output.GREEN, output.SYM_OK, v_trunc, output.RESET });
+    } else if (sys) {
+        std.debug.print("{s}{s} {s:<12}{s} ", .{ output.YELLOW, output.SYM_WARN, "system", output.RESET });
     } else {
         std.debug.print("{s}not installed{s}  ", .{ output.DIM, output.RESET });
     }

@@ -175,7 +175,8 @@ fn installGroup(
 
     printGroupBanner(group_name, group_tools.items.len);
 
-    for (group_tools.items) |t| {
+    for (group_tools.items, 0..) |t, i| {
+        printGroupToolSeparator(t.name, i + 1, group_tools.items.len);
         installTool(allocator, t.id, null, force, state, tools) catch |e| {
             printGroupToolError(t.id, e);
         };
@@ -231,8 +232,9 @@ fn installTool(
         }
     }
 
-    // Check system install (not our ~/.local/bin)
-    if (!force) {
+    // Check system install (not our ~/.local/bin) — only when dot doesn't already manage this tool.
+    // If dot already owns it (it's in state), the user already resolved the conflict; don't warn again.
+    if (!force and !state.isInstalled(t.id)) {
         if (checkSystemInstall(allocator, t.id)) |sys_path| {
             defer allocator.free(sys_path);
             printSkipSystem(t.name, sys_path, "unknown", version);
@@ -245,6 +247,7 @@ fn installTool(
         if (state.getVersion(t.id)) |installed_ver| {
             if (std.mem.eql(u8, installed_ver, version)) {
                 printAlreadyReady(t.name, installed_ver);
+                _ = writeShellIntegration(&t, allocator);
                 return;
             }
         }
@@ -303,32 +306,10 @@ fn installTool(
         bar.finish();
         output.printStep("Installation", output.SYM_OK, bin_dir);
 
-        // Shell integration (brew handles its own PATH and completions)
-        const sh = platform.Shell.detect();
-        if (sh != .unknown) {
-            var section: std.ArrayList(u8) = .empty;
-            defer section.deinit(allocator);
-
-            if (t.shell_completions) |completions| {
-                if (completions.forShell(sh)) |comp_cmd| {
-                    try section.appendSlice(allocator, comp_cmd);
-                }
-            }
-
-            for (t.aliases) |alias_name| {
-                if (section.items.len > 0) try section.append(allocator, '\n');
-                const alias_line = try std.fmt.allocPrint(allocator, "alias {s}={s}", .{ alias_name, t.id });
-                defer allocator.free(alias_line);
-                try section.appendSlice(allocator, alias_line);
-            }
-
-            if (section.items.len > 0) {
-                shell_mod.ensureSourced(sh, allocator) catch {};
-                shell_mod.addSection(sh, t.id, section.items, allocator) catch {};
-                output.printStep("Shell", output.SYM_OK, sh.name());
-            }
-        }
     }
+
+    // Shell integration (always, regardless of install method)
+    _ = writeShellIntegration(&t, allocator);
 
     // Post-install commands — only on fresh installs, not upgrades (non-fatal)
     if (!state.isInstalled(t.id) and t.post_install.len > 0) {
@@ -392,6 +373,36 @@ fn installTool(
         printResources(res_items.items);
         for (res_items.items) |item| allocator.free(item);
     }
+}
+
+/// Write shell completions and aliases for a tool. Returns true if anything was written.
+/// Uses a GPA internally so it never propagates allocation errors to callers.
+fn writeShellIntegration(t: *const tool_mod.Tool, allocator: std.mem.Allocator) bool {
+    const sh = platform.Shell.detect();
+    if (sh == .unknown) return false;
+
+    var section: std.ArrayList(u8) = .empty;
+    defer section.deinit(allocator);
+
+    if (t.shell_completions) |completions| {
+        if (completions.forShell(sh)) |comp_cmd| {
+            section.appendSlice(allocator, comp_cmd) catch return false;
+        }
+    }
+
+    for (t.aliases) |alias_name| {
+        if (section.items.len > 0) section.append(allocator, '\n') catch return false;
+        const alias_line = std.fmt.allocPrint(allocator, "alias {s}={s}", .{ alias_name, t.id }) catch return false;
+        defer allocator.free(alias_line);
+        section.appendSlice(allocator, alias_line) catch return false;
+    }
+
+    if (section.items.len == 0) return false;
+
+    shell_mod.ensureSourced(sh, allocator) catch {};
+    shell_mod.addSection(sh, t.id, section.items, allocator) catch {};
+    output.printStep("Shell", output.SYM_OK, sh.name());
+    return true;
 }
 
 fn brewInstall(allocator: std.mem.Allocator, formula: []const u8, force: bool) !void {
@@ -522,7 +533,33 @@ fn printGroupToolError(id: []const u8, err: anyerror) void {
 }
 
 fn printGroupBanner(group_name: []const u8, count: usize) void {
-    std.debug.print("Installing group '{s}' ({d} tools)...\n\n", .{ group_name, count });
+    std.debug.print("Installing group '{s}' ({d} tools)...\n", .{ group_name, count });
+}
+
+pub fn printGroupToolSeparator(name: []const u8, index: usize, total: usize) void {
+    const width = 48;
+    const counter_len = blk: {
+        // count digits in index and total, plus " [x/y] " = 7 + digits
+        var n: usize = 3; // " [" + "]"
+        var x = index;
+        while (x > 0) : (x /= 10) n += 1;
+        var y = total;
+        while (y > 0) : (y /= 10) n += 1;
+        break :blk n + 1; // +1 for "/"
+    };
+    const name_len = name.len;
+    const dashes_right = if (width > name_len + counter_len + 2)
+        width - name_len - counter_len - 2
+    else
+        0;
+
+    std.debug.print("\n{s}", .{output.DIM});
+    for (0..2) |_| std.debug.print("{s}", .{output.SYM_DASH});
+    std.debug.print("{s} {s}{s}{s} [{d}/{d}] {s}", .{
+        output.RESET, output.BOLD, name, output.RESET, index, total, output.DIM,
+    });
+    for (0..dashes_right) |_| std.debug.print("{s}", .{output.SYM_DASH});
+    std.debug.print("{s}\n", .{output.RESET});
 }
 
 

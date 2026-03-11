@@ -70,28 +70,23 @@ pub fn run(
     if (target) |name| {
         // Group upgrade: only upgrade tools in the group that are already installed
         if (install_cmd.parseGroup(name)) |group| {
-            var group_tools: std.ArrayList(tool_mod.Tool) = .empty;
-            defer group_tools.deinit(allocator);
+            var candidates: std.ArrayList(tool_mod.Tool) = .empty;
+            defer candidates.deinit(allocator);
             for (tools) |t| {
+                if (!state.isInstalled(t.id)) continue;
                 for (t.groups) |g| {
-                    if (g == group) {
-                        try group_tools.append(allocator, t);
-                        break;
-                    }
+                    if (g == group) { try candidates.append(allocator, t); break; }
                 }
             }
-
-            for (group_tools.items) |t| {
-                if (!state.isInstalled(t.id)) continue;
-                if (force) {
-                    install_cmd.run(allocator, &.{ t.id, "--force" }, state, tools) catch |e| {
-                        output.printFmt("Failed to upgrade {s}: {s}\n", .{ t.id, @errorName(e) });
-                    };
-                } else {
-                    install_cmd.run(allocator, &.{t.id}, state, tools) catch |e| {
-                        output.printFmt("Failed to upgrade {s}: {s}\n", .{ t.id, @errorName(e) });
-                    };
-                }
+            if (candidates.items.len > 0) {
+                std.debug.print("Upgrading group '{s}' ({d} installed)...\n", .{ name, candidates.items.len });
+            }
+            for (candidates.items, 0..) |t, i| {
+                install_cmd.printGroupToolSeparator(t.name, i + 1, candidates.items.len);
+                const argv: []const []const u8 = if (force) &.{ t.id, "--force" } else &.{t.id};
+                install_cmd.run(allocator, argv, state, tools) catch |e| {
+                    output.printFmt("Failed to upgrade {s}: {s}\n", .{ t.id, @errorName(e) });
+                };
             }
             return;
         }
@@ -105,32 +100,32 @@ pub fn run(
             output.printUnknownTool(name);
             return;
         }
-        if (force) {
-            try install_cmd.run(allocator, &.{ name, "--force" }, state, tools);
-        } else {
-            try install_cmd.run(allocator, &.{name}, state, tools);
-        }
+        const argv: []const []const u8 = if (force) &.{ name, "--force" } else &.{name};
+        try install_cmd.run(allocator, argv, state, tools);
     } else {
-        // Upgrade all installed tools
-        output.printRaw("Upgrading all installed tools...\n\n");
-
-        var it = state.tools.iterator();
-        var to_upgrade: std.ArrayList([]const u8) = .empty;
-        defer to_upgrade.deinit(allocator);
-        while (it.next()) |kv| {
-            try to_upgrade.append(allocator, kv.key_ptr.*);
+        // Upgrade all installed tools — iterate in registry order for determinism
+        var candidates: std.ArrayList(tool_mod.Tool) = .empty;
+        defer candidates.deinit(allocator);
+        for (tools) |t| {
+            if (state.isInstalled(t.id)) try candidates.append(allocator, t);
         }
 
-        for (to_upgrade.items) |id| {
-            if (force) {
-                install_cmd.run(allocator, &.{ id, "--force" }, state, tools) catch |e| {
-                    output.printFmt("Failed to upgrade {s}: {s}\n", .{ id, @errorName(e) });
-                };
-            } else {
-                install_cmd.run(allocator, &.{id}, state, tools) catch |e| {
-                    output.printFmt("Failed to upgrade {s}: {s}\n", .{ id, @errorName(e) });
-                };
-            }
+        if (candidates.items.len == 0) {
+            output.printRaw("No installed tools found.\n");
+            return;
+        }
+
+        std.debug.print("Upgrading {d} installed tool{s}...\n", .{
+            candidates.items.len,
+            if (candidates.items.len == 1) @as([]const u8, "") else "s",
+        });
+
+        for (candidates.items, 0..) |t, i| {
+            install_cmd.printGroupToolSeparator(t.name, i + 1, candidates.items.len);
+            const argv: []const []const u8 = if (force) &.{ t.id, "--force" } else &.{t.id};
+            install_cmd.run(allocator, argv, state, tools) catch |e| {
+                output.printFmt("Failed to upgrade {s}: {s}\n", .{ t.id, @errorName(e) });
+            };
         }
     }
 }

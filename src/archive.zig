@@ -20,17 +20,17 @@ pub fn extractTarGz(archive_path: []const u8, dest_path: []const u8, strip_compo
     });
 }
 
-/// Extract a .zip archive to a destination directory using std.zip.
-pub fn extractZip(archive_path: []const u8, dest_path: []const u8) !void {
+/// Extract a .zip archive to a destination directory using system `unzip`.
+/// Using the system unzip preserves Unix file permissions stored in the archive.
+pub fn extractZip(archive_path: []const u8, dest_path: []const u8, allocator: std.mem.Allocator) !void {
     try std.fs.cwd().makePath(dest_path);
-    const dest_dir = try std.fs.cwd().openDir(dest_path, .{});
-
-    const file = try std.fs.cwd().openFile(archive_path, .{});
-    defer file.close();
-
-    var file_buf: [4096]u8 = undefined;
-    var file_reader = file.reader(&file_buf);
-    try std.zip.extract(dest_dir, &file_reader, .{});
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "unzip", "-o", "-q", archive_path, "-d", dest_path },
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (result.term != .Exited or result.term.Exited != 0) return error.ExtractionFailed;
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -118,7 +118,7 @@ test "extractZip: single file" {
 
     const out = try std.fmt.allocPrint(allocator, "{s}/out", .{tmp_path});
     defer allocator.free(out);
-    try extractZip(archive, out);
+    try extractZip(archive, out, allocator);
 
     const content = try tmp.dir.readFileAlloc(allocator, "out/data.txt", 4096);
     defer allocator.free(content);

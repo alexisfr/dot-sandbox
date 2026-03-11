@@ -24,10 +24,13 @@ pub fn ensureSourced(shell: platform.Shell, allocator: std.mem.Allocator) !void 
     );
     defer allocator.free(integration_path);
 
-    // Ensure integration file exists
+    // Ensure integration file exists (open without truncating; create only if absent)
     const integ_dir = std.fs.path.dirname(integration_path) orelse unreachable;
     try std.fs.cwd().makePath(integ_dir);
-    const integ_file = try std.fs.cwd().createFile(integration_path, .{ .exclusive = false });
+    const integ_file = std.fs.cwd().openFile(integration_path, .{}) catch |e| switch (e) {
+        error.FileNotFound => try std.fs.cwd().createFile(integration_path, .{}),
+        else => return e,
+    };
     integ_file.close();
 
     // Check if RC already sources our file

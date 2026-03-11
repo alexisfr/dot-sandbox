@@ -88,20 +88,21 @@
     {
       "id": "kubelogin",
       "name": "kubelogin",
-      "description": "Kubernetes credential plugin for Azure/AAD authentication",
+      "description": "kubectl plugin for Kubernetes OpenID Connect authentication",
       "groups": [
         "k8s"
       ],
-      "homepage": "https://github.com/Azure/kubelogin",
+      "homepage": "https://github.com/int128/kubelogin",
       "brew_formula": "int128/kubelogin/kubelogin",
       "version_source": {
         "type": "github_release",
-        "repo": "Azure/kubelogin"
+        "repo": "int128/kubelogin"
       },
       "strategy": {
         "type": "github_release",
-        "url_template": "https://github.com/Azure/kubelogin/releases/download/v{version}/kubelogin-{os}-{arch}.zip",
-        "binary_in_archive": "bin/{os}_{arch}/kubelogin"
+        "url_template": "https://github.com/int128/kubelogin/releases/download/v{version}/kubelogin_{os}_{arch}.zip",
+        "binary_in_archive": "kubelogin",
+        "checksum_url_template": "https://github.com/int128/kubelogin/releases/download/v{version}/kubelogin_{os}_{arch}.zip.sha256"
       }
     },
     {
@@ -247,15 +248,21 @@
       "homepage": "https://aws.amazon.com/cli/",
       "brew_formula": "awscli",
       "version_source": {
-        "type": "github_release",
+        "type": "github_tags",
         "repo": "aws/aws-cli",
         "filter": "2."
       },
       "strategy": {
         "type": "tarball",
-        "url_template": "https://awscli.amazonaws.com/awscli-exe-{os}-{arch_uname}.zip",
+        "url_template": "https://awscli.amazonaws.com/awscli-exe-linux-{arch_uname}.zip",
         "strip_components": 0,
-        "install_script": "aws/install"
+        "install_script": "aws/install",
+        "install_script_args": "-i {opt_dir} -b {bin_dir} --update"
+      },
+      "shell_completions": {
+        "bash_cmd": "complete -C \"$HOME/.local/bin/aws_completer\" aws",
+        "zsh_cmd": "complete -C \"$HOME/.local/bin/aws_completer\" aws",
+        "fish_cmd": "complete -c aws -f -a '(begin; set -lx COMP_LINE (commandline); set -lx COMP_POINT (string length (commandline)); $HOME/.local/bin/aws_completer; end)'"
       }
     },
     {
@@ -267,18 +274,24 @@
       ],
       "homepage": "https://cloud.google.com/sdk",
       "version_source": {
-        "type": "static",
-        "version": "latest"
+        "type": "gcloud_sdk"
       },
       "strategy": {
         "type": "tarball",
-        "url_template": "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-{os}-{arch_uname}.tar.gz",
-        "strip_components": 1,
-        "install_script": "install.sh"
+        "url_template": "https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-{version}-{os}-{arch_uname}.tar.gz",
+        "strip_components": 0,
+        "sdk_dir": "google-cloud-sdk",
+        "install_script": "install.sh",
+        "install_script_args": "--quiet --usage-reporting false --command-completion false --path-update false",
+        "symlinks": [
+          "bin/gcloud",
+          "bin/gsutil",
+          "bin/bq"
+        ]
       },
       "shell_completions": {
-        "bash_cmd": "source ~/.local/bin/google-cloud-sdk/completion.bash.inc",
-        "zsh_cmd": "source ~/.local/bin/google-cloud-sdk/completion.zsh.inc",
+        "bash_cmd": "source \"$HOME/.local/opt/google-cloud-sdk/completion.bash.inc\"",
+        "zsh_cmd": "source \"$HOME/.local/opt/google-cloud-sdk/completion.zsh.inc\"",
         "fish_cmd": null
       }
     },

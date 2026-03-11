@@ -14,6 +14,8 @@ pub const VersionSource = union(enum) {
     k8s_stable_txt: void,
     pypi: Pypi,
     static: Static,
+    gcloud_sdk: void,
+    github_tags: GithubRelease,
 
     pub const GithubRelease = struct {
         repo: []const u8,
@@ -44,6 +46,8 @@ pub const VersionSource = union(enum) {
             .k8s_stable_txt => resolveK8sStableTxt(allocator),
             .pypi => |p| resolvePypi(allocator, p),
             .static => |s| allocator.dupe(u8, s.version),
+            .gcloud_sdk => resolveGcloudSdk(allocator),
+            .github_tags => |gh| resolveGithubTags(allocator, gh),
         };
     }
 
@@ -147,6 +151,42 @@ pub const VersionSource = union(enum) {
 
         return allocator.dupe(u8, parsed.value.info.version);
     }
+
+    fn resolveGcloudSdk(allocator: std.mem.Allocator) ![]u8 {
+        const body = http.get(allocator, "https://dl.google.com/dl/cloudsdk/channels/rapid/components-2.json") catch
+            return error.VersionFetchFailed;
+        defer allocator.free(body);
+
+        const Resp = struct { version: []const u8 = "" };
+        const parsed = std.json.parseFromSlice(Resp, allocator, body, .{ .ignore_unknown_fields = true }) catch
+            return error.VersionParseFailed;
+        defer parsed.deinit();
+
+        return allocator.dupe(u8, parsed.value.version);
+    }
+
+    fn resolveGithubTags(allocator: std.mem.Allocator, gh: GithubRelease) ![]u8 {
+        const url = try std.fmt.allocPrint(allocator, "https://api.github.com/repos/{s}/tags", .{gh.repo});
+        defer allocator.free(url);
+
+        const body = http.get(allocator, url) catch return error.VersionFetchFailed;
+        defer allocator.free(body);
+
+        const Tag = struct { name: []const u8 = "" };
+        const parsed = std.json.parseFromSlice([]Tag, allocator, body, .{ .ignore_unknown_fields = true }) catch
+            return error.VersionParseFailed;
+        defer parsed.deinit();
+
+        for (parsed.value) |tag| {
+            const name = tag.name;
+            if (gh.filter) |prefix| {
+                if (!std.mem.startsWith(u8, name, prefix)) continue;
+            }
+            const ver = tagToVersion(name, gh.strip_prefix);
+            return allocator.dupe(u8, ver);
+        }
+        return error.VersionNotFound;
+    }
 };
 
 // ─── Install strategies ───────────────────────────────────────────────────────
@@ -208,7 +248,7 @@ pub const InstallStrategy = union(enum) {
             {
                 try archive.extractTarGz(archive_path, extract_dir, 0);
             } else if (std.mem.endsWith(u8, archive_path, ".zip")) {
-                try archive.extractZip(archive_path, extract_dir);
+                try archive.extractZip(archive_path, extract_dir, ctx.allocator);
             }
             output.printStepDone("Extracting", filename);
 
@@ -274,7 +314,7 @@ pub const InstallStrategy = union(enum) {
 
             const hc_filename = std.fs.path.basename(archive_path);
             output.printStepStart("Extracting", hc_filename);
-            try archive.extractZip(archive_path, extract_dir);
+            try archive.extractZip(archive_path, extract_dir, ctx.allocator);
             output.printStepDone("Extracting", hc_filename);
 
             const src_bin = try std.fs.path.join(ctx.allocator, &.{ extract_dir, self.product });
@@ -395,8 +435,17 @@ pub const InstallStrategy = union(enum) {
         strip_components: u32 = 1,
         /// Relative path within extracted dir to find the binary, or null for manual
         binary_rel_path: ?[]const u8 = null,
-        /// If non-null, run this script relative to extracted dir instead
+        /// If non-null, run this script relative to the effective_dir instead
         install_script: ?[]const u8 = null,
+        /// If set, after extraction the subdirectory named `sdk_dir` inside the extract dir
+        /// is moved to ~/.local/opt/<sdk_dir>. The install_script (if any) is run from that
+        /// persistent directory, not from the temp extract dir. Useful for SDKs like gcloud.
+        sdk_dir: ?[]const u8 = null,
+        /// Arguments for install_script, space-separated. Supports {bin_dir} and {opt_dir}
+        /// placeholders, where {opt_dir} = ~/.local/opt/<tool-id>.
+        install_script_args: ?[]const u8 = null,
+        /// Paths relative to sdk_dir (or extract_dir if no sdk_dir) to symlink into bin_dir.
+        symlinks: []const []const u8 = &.{},
 
         pub fn execute(self: Tarball, ctx: *InstallContext) !void {
             const url = try renderTemplate(ctx.allocator, self.url_template, ctx);
@@ -418,15 +467,36 @@ pub const InstallStrategy = union(enum) {
             {
                 try archive.extractTarGz(archive_path, extract_dir, self.strip_components);
             } else if (std.mem.endsWith(u8, archive_path, ".zip")) {
-                try archive.extractZip(archive_path, extract_dir);
+                try archive.extractZip(archive_path, extract_dir, ctx.allocator);
             }
             output.printStepDone("Extracting", filename);
 
+            // Determine the working directory: either a persistent SDK dir or the temp extract dir
+            const home = std.posix.getenv("HOME") orelse "/tmp";
+            const effective_dir: []const u8 = if (self.sdk_dir) |sd| blk: {
+                const sdk_path = try std.fs.path.join(ctx.allocator, &.{ home, ".local", "opt", sd });
+                // Remove old installation and move new one into place
+                std.fs.cwd().deleteTree(sdk_path) catch {};
+                const src = try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ extract_dir, sd });
+                defer ctx.allocator.free(src);
+                const opt_parent = try std.fs.path.join(ctx.allocator, &.{ home, ".local", "opt" });
+                defer ctx.allocator.free(opt_parent);
+                std.fs.cwd().makePath(opt_parent) catch {};
+                const mv_res = try std.process.Child.run(.{
+                    .allocator = ctx.allocator,
+                    .argv = &.{ "mv", src, sdk_path },
+                });
+                ctx.allocator.free(mv_res.stdout);
+                ctx.allocator.free(mv_res.stderr);
+                if (mv_res.term != .Exited or mv_res.term.Exited != 0) return error.MoveFailed;
+                break :blk sdk_path;
+            } else try ctx.allocator.dupe(u8, extract_dir);
+            defer ctx.allocator.free(effective_dir);
+
             if (self.install_script) |script| {
-                const script_path = try std.fs.path.join(ctx.allocator, &.{ extract_dir, script });
+                const script_path = try std.fs.path.join(ctx.allocator, &.{ effective_dir, script });
                 defer ctx.allocator.free(script_path);
 
-                // Make executable
                 const chmod_res = try std.process.Child.run(.{
                     .allocator = ctx.allocator,
                     .argv = &.{ "chmod", "+x", script_path },
@@ -434,24 +504,50 @@ pub const InstallStrategy = union(enum) {
                 ctx.allocator.free(chmod_res.stdout);
                 ctx.allocator.free(chmod_res.stderr);
 
-                const install_env = try std.fmt.allocPrint(
-                    ctx.allocator,
-                    "CLOUDSDK_INSTALL_DIR={s} {s} --quiet",
-                    .{ ctx.bin_dir, script_path },
-                );
-                defer ctx.allocator.free(install_env);
+                var argv: std.ArrayList([]const u8) = .empty;
+                defer argv.deinit(ctx.allocator);
+                try argv.append(ctx.allocator, script_path);
+
+                if (self.install_script_args) |args_tmpl| {
+                    const opt_dir = try std.fmt.allocPrint(ctx.allocator, "{s}/.local/opt/{s}", .{ home, ctx.id });
+                    defer ctx.allocator.free(opt_dir);
+
+                    var it = std.mem.splitScalar(u8, args_tmpl, ' ');
+                    while (it.next()) |token| {
+                        if (token.len == 0) continue;
+                        const step1 = try std.mem.replaceOwned(u8, ctx.allocator, token, "{bin_dir}", ctx.bin_dir);
+                        defer ctx.allocator.free(step1);
+                        const step2 = try std.mem.replaceOwned(u8, ctx.allocator, step1, "{opt_dir}", opt_dir);
+                        try argv.append(ctx.allocator, step2);
+                    }
+                }
+                // Free expanded args (index 1+) after the run call; runs before deinit (LIFO)
+                defer {
+                    for (argv.items[1..]) |arg| ctx.allocator.free(arg);
+                }
 
                 const res = try std.process.Child.run(.{
                     .allocator = ctx.allocator,
-                    .argv = &.{ "sh", "-c", install_env },
+                    .argv = argv.items,
                 });
-                defer ctx.allocator.free(res.stdout);
-                defer ctx.allocator.free(res.stderr);
-                if (res.term.Exited != 0) return error.InstallScriptFailed;
+                ctx.allocator.free(res.stdout);
+                ctx.allocator.free(res.stderr);
+                if (res.term != .Exited or res.term.Exited != 0) return error.InstallScriptFailed;
             } else if (self.binary_rel_path) |rel| {
-                const src = try std.fs.path.join(ctx.allocator, &.{ extract_dir, rel });
+                const src = try std.fs.path.join(ctx.allocator, &.{ effective_dir, rel });
                 defer ctx.allocator.free(src);
                 try installBinary(ctx, src);
+            }
+
+            // Create symlinks from effective_dir into bin_dir
+            for (self.symlinks) |sym| {
+                const src = try std.fs.path.join(ctx.allocator, &.{ effective_dir, sym });
+                defer ctx.allocator.free(src);
+                const dst = try std.fs.path.join(ctx.allocator, &.{ ctx.bin_dir, std.fs.path.basename(sym) });
+                defer ctx.allocator.free(dst);
+                std.fs.cwd().makePath(ctx.bin_dir) catch {};
+                std.fs.cwd().deleteFile(dst) catch {};
+                std.fs.cwd().symLink(src, dst, .{}) catch {};
             }
         }
     };

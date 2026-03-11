@@ -398,6 +398,16 @@ fn parseVersionSource(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.V
         const ver = obj.get("version") orelse return error.MissingVersion;
         if (ver != .string) return error.InvalidVersion;
         return .{ .static = .{ .version = try arena.dupe(u8, ver.string) } };
+    } else if (std.mem.eql(u8, t, "gcloud_sdk")) {
+        return .{ .gcloud_sdk = {} };
+    } else if (std.mem.eql(u8, t, "github_tags")) {
+        const repo_val = obj.get("repo") orelse return error.MissingRepo;
+        if (repo_val != .string) return error.InvalidRepo;
+        return .{ .github_tags = .{
+            .repo = try arena.dupe(u8, repo_val.string),
+            .filter = if (obj.get("filter")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
+            .strip_prefix = if (obj.get("strip_prefix")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
+        } };
     } else {
         return error.UnknownVersionSourceType;
     }
@@ -459,11 +469,25 @@ fn parseStrategy(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.Instal
         } else 1;
         const bin_rel = if (obj.get("binary_rel_path")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null;
         const script = if (obj.get("install_script")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null;
+        const sdk_dir = if (obj.get("sdk_dir")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null;
+        const script_args = if (obj.get("install_script_args")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null;
+        const symlinks: []const []const u8 = if (obj.get("symlinks")) |sv| blk: {
+            if (sv != .array) break :blk &.{};
+            var list: std.ArrayList([]const u8) = .empty;
+            for (sv.array.items) |item| {
+                if (item != .string) continue;
+                try list.append(arena, try arena.dupe(u8, item.string));
+            }
+            break :blk try list.toOwnedSlice(arena);
+        } else &.{};
         return .{ .tarball = .{
             .url_template = try arena.dupe(u8, url_tmpl.string),
             .strip_components = strip,
             .binary_rel_path = bin_rel,
             .install_script = script,
+            .sdk_dir = sdk_dir,
+            .install_script_args = script_args,
+            .symlinks = symlinks,
         } };
     } else {
         return error.UnknownStrategyType;
