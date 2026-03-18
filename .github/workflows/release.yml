@@ -28,13 +28,9 @@ jobs:
       matrix:
         include:
           - os: ubuntu-latest
-            asset_suffix: linux-x86_64
-          - os: ubuntu-24.04-arm
-            asset_suffix: linux-aarch64
+            targets: "x86_64-linux-musl aarch64-linux-musl"
           - os: macos-latest
-            asset_suffix: macos-aarch64
-          - os: macos-13
-            asset_suffix: macos-x86_64
+            targets: "aarch64-macos x86_64-macos"
 
     steps:
       - uses: actions/checkout@v4
@@ -43,18 +39,21 @@ jobs:
         with:
           version: "0.15.2"
 
-      - name: Build release binary
-        run: zig build -Doptimize=ReleaseFast
-
-      - name: Package artifact
+      - name: Build and package all targets
         run: |
-          mkdir -p dist
-          cp zig-out/bin/dot dist/
-          cp LICENSE README.md dist/
-          tar -czf "dot-${{ github.ref_name }}-${{ matrix.asset_suffix }}.tar.gz" -C dist .
+          for target in ${{ matrix.targets }}; do
+            os=$(echo "$target" | cut -d- -f2)
+            arch=$(echo "$target" | cut -d- -f1)
+            zig build -Dtarget="$target" -Doptimize=ReleaseFast
+            mkdir -p dist
+            cp zig-out/bin/dot dist/
+            cp LICENSE README.md dist/
+            tar -czf "dot-${{ github.ref_name }}-${os}-${arch}.tar.gz" -C dist .
+            rm -rf dist
+          done
 
-      - name: Upload release asset
+      - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: dot-${{ github.ref_name }}-${{ matrix.asset_suffix }}.tar.gz
+          files: dot-${{ github.ref_name }}-*.tar.gz
           generate_release_notes: true
