@@ -1,4 +1,4 @@
-# dot — DevOps Toolbox
+# dot — The DevOps Toolbox
 
 A fast, single-binary CLI tool manager for DevOps practitioners. Install and manage
 helm, kubectl, terraform, jq and more — with shell completions and aliases wired up
@@ -7,7 +7,7 @@ automatically.
 ## Quick install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/the-devops-hub/dot/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/the-devops-hub/dot/main/install.sh | sh
 ```
 
 Then restart your shell or run `source ~/.config/fish/config.fish` (fish) / `source ~/.zshrc` (zsh).

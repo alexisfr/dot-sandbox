@@ -1,5 +1,6 @@
 const std = @import("std");
 const state_mod = @import("../state.zig");
+const tool_mod = @import("../tool.zig");
 const platform = @import("../platform.zig");
 const output = @import("../ui/output.zig");
 
@@ -10,6 +11,7 @@ const HELP =
     \\  • OS and architecture
     \\  • Detected shell and package manager
     \\  • Installed tool binaries and their locations
+    \\  • Orphaned state entries (tools no longer in any repository)
     \\  • Shell integration file status
     \\
     \\Options:
@@ -52,6 +54,7 @@ pub fn run(
     allocator: std.mem.Allocator,
     args: []const []const u8,
     state: *state_mod.State,
+    tools: []const tool_mod.Tool,
 ) !void {
     for (args) |a| {
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
@@ -98,29 +101,64 @@ pub fn run(
         }
     }
 
-    // Installed tools: verify binaries via PATH using `which`
+    // Installed tools: check ~/.local/bin/<id> first, fall back to `which` for
+    // system-package installs whose binary lands elsewhere in PATH.
     printDoctorSection("Installed Tools");
 
     var it = state.tools.iterator();
     while (it.next()) |kv| {
         const id = kv.key_ptr.*;
+        const bin_path = std.fs.path.join(allocator, &.{ home, ".local", "bin", id }) catch continue;
+        defer allocator.free(bin_path);
+
+        if (std.fs.cwd().access(bin_path, .{})) |_| {
+            printCheckPass(id, bin_path); pass += 1;
+            continue;
+        } else |_| {}
+
+        // Not in ~/.local/bin — try `which` (covers system_package installs)
         const result = std.process.Child.run(.{
             .allocator = allocator,
             .argv = &.{ "which", id },
             .max_output_bytes = 512,
         }) catch {
-            printCheckFail(id, "not found in PATH");
+            printCheckFail(id, "not found — run: dot install <tool> --force");
             fail += 1;
             continue;
         };
         defer allocator.free(result.stdout);
         defer allocator.free(result.stderr);
         if (result.term == .Exited and result.term.Exited == 0) {
-            const bin_path = std.mem.trimRight(u8, result.stdout, "\n");
-            printCheckPass(id, bin_path); pass += 1;
+            const found_path = std.mem.trimRight(u8, result.stdout, "\n");
+            printCheckPass(id, found_path); pass += 1;
         } else {
-            printCheckWarn(id, "installed but not in PATH"); warn += 1;
+            printCheckFail(id, "not found — run: dot install <tool> --force"); fail += 1;
         }
+    }
+
+    // State consistency: flag entries that are no longer in any repository.
+    // "dot" is excluded — it is self-managed via `dot update`.
+    printDoctorSection("State Consistency");
+
+    var has_orphan = false;
+    var it2 = state.tools.iterator();
+    while (it2.next()) |kv| {
+        const id = kv.key_ptr.*;
+        if (std.mem.eql(u8, id, "dot")) continue;
+        var found = false;
+        for (tools) |t| {
+            if (std.mem.eql(u8, t.id, id)) { found = true; break; }
+        }
+        if (!found) {
+            const detail = std.fmt.allocPrint(allocator, "not in any repository — run: dot uninstall {s}", .{id}) catch null;
+            defer if (detail) |d| allocator.free(d);
+            printCheckWarn(id, detail orelse "not in any repository");
+            warn += 1;
+            has_orphan = true;
+        }
+    }
+    if (!has_orphan) {
+        printCheckPass("All state entries", "present in repository"); pass += 1;
     }
 
     // Shell integration file

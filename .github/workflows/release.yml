@@ -42,8 +42,16 @@ jobs:
       - name: Build and package all targets
         run: |
           for target in ${{ matrix.targets }}; do
-            os=$(echo "$target" | cut -d- -f2)
-            arch=$(echo "$target" | cut -d- -f1)
+            raw_arch=$(echo "$target" | cut -d- -f1)
+            raw_os=$(echo "$target" | cut -d- -f2)
+            case "$raw_os" in
+              linux) os="linux" ;;
+              macos) os="darwin" ;;
+            esac
+            case "$raw_arch" in
+              x86_64)  arch="amd64" ;;
+              aarch64) arch="arm64" ;;
+            esac
             zig build -Dtarget="$target" -Doptimize=ReleaseFast
             mkdir -p dist
             cp zig-out/bin/dot dist/

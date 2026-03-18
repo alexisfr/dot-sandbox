@@ -5,6 +5,7 @@ const list_cmd = @import("cmd/list.zig");
 const status_cmd = @import("cmd/status.zig");
 const doctor_cmd = @import("cmd/doctor.zig");
 const upgrade_cmd = @import("cmd/upgrade.zig");
+const update_cmd = @import("cmd/update.zig");
 const uninstall_cmd = @import("cmd/uninstall.zig");
 const repository_cmd = @import("cmd/repository.zig");
 const output = @import("ui/output.zig");
@@ -26,6 +27,7 @@ const HELP =
     \\  install     Install a tool or group of tools
     \\  uninstall   Remove a tool
     \\  upgrade     Upgrade installed tools
+    \\  update      Update dot itself to the latest release
     \\  list        List available tools
     \\  status      Show installed tools and versions
     \\  doctor      Check system health
@@ -75,16 +77,16 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
         return status_cmd.run(allocator, args, &state);
     }
 
-    if (std.mem.eql(u8, command, "doctor")) {
-        var state = try state_mod.State.init(allocator);
-        defer state.deinit();
-        return doctor_cmd.run(allocator, args, &state);
-    }
-
     if (std.mem.eql(u8, command, "repository")) {
         var state = try state_mod.State.init(allocator);
         defer state.deinit();
         return repository_cmd.run(allocator, args, &state);
+    }
+
+    if (std.mem.eql(u8, command, "update")) {
+        var state = try state_mod.State.init(allocator);
+        defer state.deinit();
+        return update_cmd.run(allocator, args, &state);
     }
 
     // Commands that need the merged tool list (builtins + external)
@@ -96,6 +98,12 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
 
     const tools = try mergeTools(allocator, builtin.tools, external.tools);
     defer allocator.free(tools);
+
+    if (std.mem.eql(u8, command, "doctor")) {
+        var state = try state_mod.State.init(allocator);
+        defer state.deinit();
+        return doctor_cmd.run(allocator, args, &state, tools);
+    }
 
     if (std.mem.eql(u8, command, "list")) {
         var state = try state_mod.State.init(allocator);
@@ -122,7 +130,7 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
     }
 
     // Suggest the closest known command if the edit distance is small enough.
-    const known = [_][]const u8{ "list", "install", "uninstall", "status", "upgrade", "doctor", "repository" };
+    const known = [_][]const u8{ "list", "install", "uninstall", "status", "upgrade", "update", "doctor", "repository" };
     var best_dist: usize = std.math.maxInt(usize);
     var best_cmd: []const u8 = "";
     for (known) |k| {

@@ -661,20 +661,26 @@ pub fn renderTemplate(allocator: std.mem.Allocator, tmpl: []const u8, ctx: *cons
 }
 
 /// Copy src_path binary to ctx.bin_dir/ctx.id and make it executable.
+/// Uses a copy-then-rename pattern so replacing the running binary is safe.
 fn installBinary(ctx: *InstallContext, src_path: []const u8) !void {
     std.fs.cwd().makePath(ctx.bin_dir) catch {};
 
     const dest = try std.fs.path.join(ctx.allocator, &.{ ctx.bin_dir, ctx.id });
     defer ctx.allocator.free(dest);
 
-    try std.fs.cwd().copyFile(src_path, std.fs.cwd(), dest, .{});
+    const tmp_dest = try std.fmt.allocPrint(ctx.allocator, "{s}.new", .{dest});
+    defer ctx.allocator.free(tmp_dest);
+
+    try std.fs.cwd().copyFile(src_path, std.fs.cwd(), tmp_dest, .{});
 
     const chmod = try std.process.Child.run(.{
         .allocator = ctx.allocator,
-        .argv = &.{ "chmod", "+x", dest },
+        .argv = &.{ "chmod", "+x", tmp_dest },
     });
     ctx.allocator.free(chmod.stdout);
     ctx.allocator.free(chmod.stderr);
+
+    try std.fs.rename(std.fs.cwd(), tmp_dest, std.fs.cwd(), dest);
 
     output.printInstalledTo(dest);
 }
