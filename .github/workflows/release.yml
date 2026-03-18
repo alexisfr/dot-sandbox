@@ -8,7 +8,7 @@ permissions:
   contents: write
 
 jobs:
-  release:
+  validate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,29 +17,44 @@ jobs:
         with:
           version: "0.15.2"
 
-      - name: Build all targets
+      - name: Run release checks
+        run: ./scripts/release-check.sh "${{ github.ref_name }}"
+
+  release:
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset_suffix: linux-x86_64
+          - os: ubuntu-24.04-arm
+            asset_suffix: linux-aarch64
+          - os: macos-latest
+            asset_suffix: macos-aarch64
+          - os: macos-13
+            asset_suffix: macos-x86_64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: "0.15.2"
+
+      - name: Build release binary
+        run: zig build -Doptimize=ReleaseFast
+
+      - name: Package artifact
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
+          mkdir -p dist
+          cp zig-out/bin/dot dist/
+          cp LICENSE README.md dist/
+          tar -czf "dot-${{ github.ref_name }}-${{ matrix.asset_suffix }}.tar.gz" -C dist .
 
-          zig build -Dtarget=x86_64-linux-musl  -Doptimize=ReleaseFast
-          tar czf dot-${VERSION}-linux-x86_64.tar.gz  -C zig-out/bin dot
-
-          zig build -Dtarget=aarch64-linux-musl -Doptimize=ReleaseFast
-          tar czf dot-${VERSION}-linux-aarch64.tar.gz -C zig-out/bin dot
-
-          zig build -Dtarget=x86_64-macos       -Doptimize=ReleaseFast
-          tar czf dot-${VERSION}-macos-x86_64.tar.gz  -C zig-out/bin dot
-
-          zig build -Dtarget=aarch64-macos      -Doptimize=ReleaseFast
-          tar czf dot-${VERSION}-macos-aarch64.tar.gz -C zig-out/bin dot
-
-          sha256sum dot-*.tar.gz > checksums.txt
-
-      - name: Create GitHub release
-        run: |
-          gh release create ${{ github.ref_name }} \
-            --title "dot ${{ github.ref_name }}" \
-            --generate-notes \
-            dot-*.tar.gz checksums.txt
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dot-${{ github.ref_name }}-${{ matrix.asset_suffix }}.tar.gz
+          generate_release_notes: true
