@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+  pull_request:
+    branches: [main]
+    paths-ignore: ['**.md']
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: "0.15.2"
+
+      - name: Run tests
+        run: zig build test --summary all
+
+      - name: Cross-compile all release targets
+        run: |
+          zig build -Dtarget=x86_64-linux-musl   -Doptimize=ReleaseFast
+          zig build -Dtarget=aarch64-linux-musl  -Doptimize=ReleaseFast
+          zig build -Dtarget=x86_64-macos        -Doptimize=ReleaseFast
+          zig build -Dtarget=aarch64-macos       -Doptimize=ReleaseFast

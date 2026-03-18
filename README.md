@@ -4,12 +4,27 @@ A fast, single-binary CLI tool manager for DevOps practitioners. Install and man
 helm, kubectl, terraform, jq and more — with shell completions and aliases configured
 automatically.
 
-Written in Zig 0.15.2 with no external dependencies.
-
 ## Install
 
+Download the latest binary from [Releases](https://github.com/the-devops-hub/dot/releases):
+
 ```sh
-# Build from source (requires Zig 0.15.2)
+# Linux x86_64
+curl -L https://github.com/the-devops-hub/dot/releases/latest/download/dot-linux-x86_64.tar.gz | tar xz
+sudo mv dot /usr/local/bin/dot
+
+# macOS Apple Silicon
+curl -L https://github.com/the-devops-hub/dot/releases/latest/download/dot-macos-aarch64.tar.gz | tar xz
+sudo mv dot /usr/local/bin/dot
+
+# macOS Intel
+curl -L https://github.com/the-devops-hub/dot/releases/latest/download/dot-macos-x86_64.tar.gz | tar xz
+sudo mv dot /usr/local/bin/dot
+```
+
+Or build from source (requires [Zig 0.15.2](https://ziglang.org/download/)):
+
+```sh
 git clone https://github.com/the-devops-hub/dot
 cd dot
 zig build -Doptimize=ReleaseFast
