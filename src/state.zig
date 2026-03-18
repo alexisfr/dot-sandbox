@@ -95,7 +95,6 @@ pub const State = struct {
                 }
             }
         }
-
     }
 
     pub fn save(self: *State) !void {
@@ -183,7 +182,6 @@ pub const State = struct {
         _ = self.tools.remove(id);
         try self.save();
     }
-
 };
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

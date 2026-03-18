@@ -46,7 +46,11 @@ pub fn ensureSourced(shell: platform.Shell, allocator: std.mem.Allocator) !void 
     rc_content.close();
     defer allocator.free(content);
 
-    if (std.mem.indexOf(u8, content, SOURCE_MARKER) != null) return; // already sourced
+    if (std.mem.indexOf(u8, content, SOURCE_MARKER) != null) {
+        // Already sourced — still normalize integration file to clean up any accumulated blank lines
+        try normalizeIntegrationFile(integration_path, allocator);
+        return;
+    }
 
     const source_line = try buildSourceLine(shell, integration_path, allocator);
     defer allocator.free(source_line);
@@ -184,7 +188,8 @@ pub fn rebuildWithSection(
         try out.append(allocator, '\n');
     }
 
-    return out.toOwnedSlice(allocator);
+    // Normalize: collapse multiple consecutive blank lines into one, strip trailing blank lines.
+    return normalizeBlankLines(allocator, out.items);
 }
 
 /// Given existing file content, return new content with the marked section removed.
@@ -211,10 +216,36 @@ pub fn rebuildWithoutSection(
         }
     }
 
-    return out.toOwnedSlice(allocator);
+    return normalizeBlankLines(allocator, out.items);
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Collapse runs of blank lines into a single blank line and strip trailing blank lines.
+/// Returns a caller-owned slice.
+fn normalizeBlankLines(allocator: std.mem.Allocator, content: []const u8) ![]u8 {
+    var out: std.ArrayList(u8) = .empty;
+    defer out.deinit(allocator);
+
+    var lines = std.mem.splitScalar(u8, content, '\n');
+    var consecutive_blank: usize = 0;
+    while (lines.next()) |line| {
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (trimmed.len == 0) {
+            consecutive_blank += 1;
+        } else {
+            if (consecutive_blank > 0) {
+                // Emit exactly one blank line between non-blank content
+                try out.appendSlice(allocator, "\n");
+                consecutive_blank = 0;
+            }
+            try out.appendSlice(allocator, line);
+            try out.append(allocator, '\n');
+        }
+    }
+    // Strip trailing blank lines — out already ends with '\n' from last non-blank line
+    return out.toOwnedSlice(allocator);
+}
 
 fn buildSourceLine(shell: platform.Shell, integration_path: []const u8, allocator: std.mem.Allocator) ![]u8 {
     return switch (shell) {
@@ -257,6 +288,16 @@ fn ensurePathInIntegration(
     defer allocator.free(addition);
 
     try appendToFile(integration_path, addition);
+}
+
+fn normalizeIntegrationFile(path: []const u8, allocator: std.mem.Allocator) !void {
+    const file = std.fs.cwd().openFile(path, .{}) catch return; // not yet created — nothing to normalize
+    const existing = try file.readToEndAlloc(allocator, 4 * 1024 * 1024);
+    file.close();
+    defer allocator.free(existing);
+    const cleaned = try normalizeBlankLines(allocator, existing);
+    defer allocator.free(cleaned);
+    try writeFile(path, cleaned);
 }
 
 fn appendToFile(path: []const u8, content: []const u8) !void {
@@ -373,8 +414,8 @@ test "rebuildWithoutSection: no-op if section absent" {
     try std.testing.expect(std.mem.indexOf(u8, result, "export EDITOR=vim") != null);
 }
 
-test "rebuildWithoutSection: empty content stays empty-ish" {
+test "rebuildWithoutSection: empty content stays empty" {
     const result = try rebuildWithoutSection("", "# BEGIN HELM", "# END HELM", std.testing.allocator);
     defer std.testing.allocator.free(result);
-    try std.testing.expectEqualStrings("\n", result); // splitScalar on "" produces one empty token
+    try std.testing.expectEqualStrings("", result);
 }

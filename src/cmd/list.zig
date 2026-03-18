@@ -23,7 +23,6 @@ const HELP =
 
 // Fixed column widths (visual chars)
 const COL_ID: usize = 16;
-const COL_STATUS: usize = 14;  // "✓ 1.35.2      " or "not installed "
 const COL_GROUPS: usize = 16;
 // Overhead: id(16) + sp(1) + status(14) + sp(1) + groups(16) + sp(1) = 49
 // Description is rightmost — no reserve needed, gets all remaining space

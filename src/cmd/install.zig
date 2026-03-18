@@ -146,18 +146,16 @@ fn installGroup(
     tools: []const tool_mod.Tool,
 ) !void {
     const is_all = std.mem.eql(u8, group_name, "all");
-    if (!is_all and parseGroup(group_name) == null) {
-        printUnknownGroup(group_name);
-        return;
-    }
-
     var group_tools: std.ArrayList(tool_mod.Tool) = .empty;
     defer group_tools.deinit(allocator);
 
     if (is_all) {
         try group_tools.appendSlice(allocator, tools);
     } else {
-        const group = parseGroup(group_name).?;
+        const group = parseGroup(group_name) orelse {
+            printUnknownGroup(group_name);
+            return;
+        };
         for (tools) |t| {
             for (t.groups) |g| {
                 if (g == group) {
@@ -247,7 +245,6 @@ fn installTool(
         if (state.getVersion(t.id)) |installed_ver| {
             if (std.mem.eql(u8, installed_ver, version)) {
                 printAlreadyReady(t.name, installed_ver);
-                _ = writeShellIntegration(&t, allocator);
                 return;
             }
         }
@@ -376,7 +373,6 @@ fn installTool(
 }
 
 /// Write shell completions and aliases for a tool. Returns true if anything was written.
-/// Uses a GPA internally so it never propagates allocation errors to callers.
 fn writeShellIntegration(t: *const tool_mod.Tool, allocator: std.mem.Allocator) bool {
     const sh = platform.Shell.detect();
     if (sh == .unknown) return false;
@@ -395,6 +391,24 @@ fn writeShellIntegration(t: *const tool_mod.Tool, allocator: std.mem.Allocator) 
         const alias_line = std.fmt.allocPrint(allocator, "alias {s}={s}", .{ alias_name, t.id }) catch return false;
         defer allocator.free(alias_line);
         section.appendSlice(allocator, alias_line) catch return false;
+
+        // Delegate completions to the original command so tab-completion works with the alias.
+        // Fish: `complete -c <alias> -w <id>` inherits all completions via --wraps.
+        // Zsh:  `compdef <alias>=<id>` delegates the completion function.
+        // Bash: the generated completion function name (e.g. __start_kubectl) isn't predictable
+        //       enough for a generic solution, so bash users get the alias but not the completions.
+        const comp_delegation: ?[]const u8 = switch (sh) {
+            .fish => std.fmt.allocPrint(allocator, "\ncomplete -c {s} -w {s}", .{ alias_name, t.id }) catch null,
+            .zsh => if (t.shell_completions != null and t.shell_completions.?.zsh_cmd != null)
+                std.fmt.allocPrint(allocator, "\ncompdef {s}={s}", .{ alias_name, t.id }) catch null
+            else
+                null,
+            else => null,
+        };
+        if (comp_delegation) |line| {
+            defer allocator.free(line);
+            section.appendSlice(allocator, line) catch {};
+        }
     }
 
     if (section.items.len == 0) return false;
