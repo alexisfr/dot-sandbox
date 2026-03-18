@@ -48,12 +48,12 @@ jobs:
             mkdir -p dist
             cp zig-out/bin/dot dist/
             cp LICENSE README.md dist/
-            tar -czf "dot-${{ github.ref_name }}-${os}-${arch}.tar.gz" -C dist .
+            tar -czf "dot-${os}-${arch}.tar.gz" -C dist .
             rm -rf dist
           done
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: dot-${{ github.ref_name }}-*.tar.gz
+          files: dot-*.tar.gz
           generate_release_notes: true
