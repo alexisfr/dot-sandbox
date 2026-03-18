@@ -43,14 +43,15 @@ After installing a tool, dot writes completions and aliases to a shell integrati
 file sourced from your RC file. Aliases (e.g. `k` for kubectl, `tf` for terraform)
 get completion delegation so tab-complete works on the alias too.
 
-## Plugin system
+## External repositories
 
-Any executable named `dot-<name>` on PATH is available as `dot <name>`:
+dot supports external tool repositories — JSON files hosted anywhere:
 
 ```sh
-dot plugin install https://github.com/user/dot-myplugin
-dot plugin list
-dot myplugin --help
+dot repository add https://example.com/my-tools/repository.json
+dot repository list
+dot repository update
+dot repository remove my-tools
 ```
 
 ## Build from source
