@@ -85,12 +85,13 @@ pub fn run(
     };
     output.printStep("Cleanup", output.SYM_OK, bin_path);
 
-    // Remove shell integration section
-    const sh = platform.Shell.detect();
-    if (sh != .unknown) {
+    // Remove shell integration section from all known shells, not just the active one.
+    // A tool may have been installed under a different shell than the one currently running.
+    const all_shells = [_]platform.Shell{ .bash, .zsh, .fish };
+    for (all_shells) |sh| {
         shell_mod.removeSection(sh, id, allocator) catch {};
-        output.printStep("Shell", output.SYM_OK, "removed");
     }
+    output.printStep("Shell", output.SYM_OK, "removed");
 
     // Update state
     try state.removeTool(id);

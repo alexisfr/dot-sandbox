@@ -373,6 +373,16 @@ fn installTool(
 }
 
 /// Write shell completions and aliases for a tool. Returns true if anything was written.
+/// Wrap a completion command in a shell-appropriate existence guard so that
+/// sourcing the integration file silently skips missing binaries.
+fn guardedCompletion(sh: platform.Shell, id: []const u8, cmd: []const u8, allocator: std.mem.Allocator) ![]u8 {
+    return switch (sh) {
+        .fish => std.fmt.allocPrint(allocator, "if command -q {s}\n    {s}\nend", .{ id, cmd }),
+        .bash, .zsh => std.fmt.allocPrint(allocator, "command -v {s} >/dev/null 2>&1 && {s}", .{ id, cmd }),
+        .unknown => allocator.dupe(u8, cmd),
+    };
+}
+
 fn writeShellIntegration(t: *const tool_mod.Tool, allocator: std.mem.Allocator) bool {
     const sh = platform.Shell.detect();
     if (sh == .unknown) return false;
@@ -382,7 +392,9 @@ fn writeShellIntegration(t: *const tool_mod.Tool, allocator: std.mem.Allocator) 
 
     if (t.shell_completions) |completions| {
         if (completions.forShell(sh)) |comp_cmd| {
-            section.appendSlice(allocator, comp_cmd) catch return false;
+            const guarded = guardedCompletion(sh, t.id, comp_cmd, allocator) catch return false;
+            defer allocator.free(guarded);
+            section.appendSlice(allocator, guarded) catch return false;
         }
     }
 

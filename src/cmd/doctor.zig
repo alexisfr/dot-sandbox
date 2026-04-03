@@ -12,7 +12,7 @@ const HELP =
     \\  • Detected shell and package manager
     \\  • Installed tool binaries and their locations
     \\  • Orphaned state entries (tools no longer in any repository)
-    \\  • Shell integration file status
+    \\  • Shell integration file status and unguarded invocations
     \\
     \\Options:
     \\  --help, -h    Show this help
@@ -48,6 +48,65 @@ fn printDoctorSummary(pass: usize, warn: usize, fail: usize) void {
         output.YELLOW, warn,  output.RESET,
         output.RED,    fail,  output.RESET,
     });
+}
+
+/// Extract the content between `# BEGIN <UPPER_ID>` and `# END <UPPER_ID>` markers.
+/// Returns null if the section is absent. Caller owns the returned slice.
+fn extractSection(content: []const u8, tool_id: []const u8, allocator: std.mem.Allocator) ?[]u8 {
+    const upper = allocator.dupe(u8, tool_id) catch return null;
+    defer allocator.free(upper);
+    for (upper) |*c| c.* = std.ascii.toUpper(c.*);
+
+    const begin_marker = std.fmt.allocPrint(allocator, "# BEGIN {s}", .{upper}) catch return null;
+    defer allocator.free(begin_marker);
+    const end_marker = std.fmt.allocPrint(allocator, "# END {s}", .{upper}) catch return null;
+    defer allocator.free(end_marker);
+
+    const begin_pos = std.mem.indexOf(u8, content, begin_marker) orelse return null;
+    const after_begin = begin_pos + begin_marker.len;
+    const start = if (after_begin < content.len and content[after_begin] == '\n') after_begin + 1 else after_begin;
+    const end_pos = std.mem.indexOf(u8, content[start..], end_marker) orelse return null;
+    return allocator.dupe(u8, content[start .. start + end_pos]) catch null;
+}
+
+/// Return true if the section contains a bare tool invocation not wrapped in a
+/// shell existence guard (`if command -q` for fish, `command -v` for bash/zsh).
+fn hasUnguardedInvocations(section: []const u8, tool_id: []const u8, shell: platform.Shell) bool {
+    var inside_guard = false;
+    var lines = std.mem.splitScalar(u8, section, '\n');
+    while (lines.next()) |line| {
+        const t = std.mem.trim(u8, line, " \t\r");
+        if (t.len == 0 or t[0] == '#') continue;
+
+        switch (shell) {
+            .fish => {
+                if (std.mem.startsWith(u8, t, "if command -q ")) {
+                    inside_guard = true;
+                } else if (std.mem.eql(u8, t, "end")) {
+                    inside_guard = false;
+                } else if (!inside_guard and isInvocation(t, tool_id)) {
+                    return true;
+                }
+            },
+            .bash, .zsh => {
+                if (isInvocation(t, tool_id) and !std.mem.startsWith(u8, t, "command -v ")) {
+                    return true;
+                }
+            },
+            .unknown => {},
+        }
+    }
+    return false;
+}
+
+/// True if the line's first word is the tool binary (not alias/complete/compdef).
+fn isInvocation(line: []const u8, tool_id: []const u8) bool {
+    if (std.mem.startsWith(u8, line, "alias ") or
+        std.mem.startsWith(u8, line, "complete ") or
+        std.mem.startsWith(u8, line, "compdef ")) return false;
+    if (!std.mem.startsWith(u8, line, tool_id)) return false;
+    if (line.len == tool_id.len) return true;
+    return line[tool_id.len] == ' ' or line[tool_id.len] == '|' or line[tool_id.len] == '\t';
 }
 
 pub fn run(
@@ -161,18 +220,50 @@ pub fn run(
         printCheckPass("All state entries", "present in repository"); pass += 1;
     }
 
-    // Shell integration file
+    // Shell integration: check file existence and scan for unguarded invocations.
+    // All known shells are checked; only the active shell's missing file is a warning.
     printDoctorSection("Shell Integration");
 
-    const integ_path = std.fs.path.join(allocator, &.{
-        home, ".local", "bin", sh.integrationFileName(),
-    }) catch null;
-    if (integ_path) |p| {
-        defer allocator.free(p);
-        if (std.fs.cwd().access(p, .{})) |_| {
-            printCheckPass("Integration file", p); pass += 1;
-        } else |_| {
-            printCheckWarn("Integration file", "not found (run a tool install to create it)"); warn += 1;
+    const all_shells = [_]platform.Shell{ .bash, .zsh, .fish };
+    for (all_shells) |check_sh| {
+        const integ_path = std.fs.path.join(allocator, &.{
+            home, ".local", "bin", check_sh.integrationFileName(),
+        }) catch continue;
+        defer allocator.free(integ_path);
+
+        const content = blk: {
+            const f = std.fs.cwd().openFile(integ_path, .{}) catch {
+                if (check_sh == sh) {
+                    printCheckWarn(check_sh.name(), "integration file not found (run a tool install to create it)");
+                    warn += 1;
+                }
+                break :blk null;
+            };
+            defer f.close();
+            break :blk f.readToEndAlloc(allocator, 4 * 1024 * 1024) catch null;
+        };
+        const c = content orelse continue;
+        defer allocator.free(c);
+
+        var unguarded_found = false;
+        var it3 = state.tools.iterator();
+        while (it3.next()) |kv| {
+            const id = kv.key_ptr.*;
+            const section = extractSection(c, id, allocator) orelse continue;
+            defer allocator.free(section);
+            if (hasUnguardedInvocations(section, id, check_sh)) {
+                const label = std.fmt.allocPrint(allocator, "{s} ({s})", .{ id, check_sh.name() }) catch continue;
+                defer allocator.free(label);
+                const detail = std.fmt.allocPrint(allocator, "unguarded invocation — run: dot install {s} --force", .{id}) catch null;
+                defer if (detail) |d| allocator.free(d);
+                printCheckWarn(label, detail orelse "unguarded invocation");
+                warn += 1;
+                unguarded_found = true;
+            }
+        }
+
+        if (!unguarded_found) {
+            printCheckPass(check_sh.name(), integ_path); pass += 1;
         }
     }
 

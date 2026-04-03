@@ -3,7 +3,7 @@ const tool = @import("../tool.zig");
 const http = @import("../http.zig");
 
 const BUILTIN_REPO_NAME = "the-devops-hub";
-const BUILTIN_REPO_URL = "https://raw.githubusercontent.com/the-devops-hub/dot/main/repository.json";
+const BUILTIN_REPO_URL = "https://raw.githubusercontent.com/the-devops-hub/dot/main/src/repository/builtin-repository.json";
 const BUILTIN_REPO_BYTES: []const u8 = @embedFile("builtin-repository.json");
 
 /// Load built-in tools. Uses cached online version when fresh; falls back to
@@ -577,12 +577,12 @@ test "countToolsInJson: counts correctly" {
     try std.testing.expectEqual(@as(usize, 3), n);
 }
 
-test "BUILTIN_REPO_BYTES: parses all 14 built-in tools" {
+test "BUILTIN_REPO_BYTES: parses all 16 built-in tools" {
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
     var arena_inst = std.heap.ArenaAllocator.init(alloc);
     defer arena_inst.deinit();
     const tools = try parseRepositoryJson(arena_inst.allocator(), alloc, BUILTIN_REPO_BYTES);
-    try std.testing.expectEqual(@as(usize, 14), tools.len);
+    try std.testing.expectEqual(@as(usize, 19), tools.len);
 }

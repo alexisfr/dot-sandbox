@@ -67,6 +67,29 @@
             }
         },
         {
+            "id": "argocd",
+            "name": "ArgoCD CLI",
+            "description": "CLI for Argo CD — GitOps continuous delivery for Kubernetes",
+            "groups": [
+                "k8s"
+            ],
+            "homepage": "https://argo-cd.readthedocs.io",
+            "brew_formula": "argocd",
+            "version_source": {
+                "type": "github_release",
+                "repo": "argoproj/argo-cd"
+            },
+            "strategy": {
+                "type": "direct_binary",
+                "url_template": "https://github.com/argoproj/argo-cd/releases/download/v{version}/argocd-{os}-{arch}"
+            },
+            "shell_completions": {
+                "bash_cmd": "source <(argocd completion bash)",
+                "zsh_cmd": "source <(argocd completion zsh)",
+                "fish_cmd": "argocd completion fish | source"
+            }
+        },
+        {
             "id": "k9s",
             "name": "k9s",
             "description": "Terminal UI to interact with Kubernetes clusters",
@@ -103,6 +126,72 @@
                 "url_template": "https://github.com/int128/kubelogin/releases/download/v{version}/kubelogin_{os}_{arch}.zip",
                 "binary_in_archive": "kubelogin",
                 "checksum_url_template": "https://github.com/int128/kubelogin/releases/download/v{version}/kubelogin_{os}_{arch}.zip.sha256"
+            }
+        },
+        {
+            "id": "tflint",
+            "name": "tflint",
+            "description": "A pluggable Terraform linter",
+            "groups": [
+                "iac"
+            ],
+            "homepage": "https://github.com/terraform-linters/tflint",
+            "brew_formula": "tflint",
+            "version_source": {
+                "type": "github_release",
+                "repo": "terraform-linters/tflint"
+            },
+            "strategy": {
+                "type": "github_release",
+                "url_template": "https://github.com/terraform-linters/tflint/releases/download/v{version}/tflint_{os}_{arch}.zip",
+                "binary_in_archive": "tflint"
+            },
+            "shell_completions": {
+                "bash_cmd": "source <(tflint --init 2>/dev/null; tflint completion bash 2>/dev/null)",
+                "zsh_cmd": null,
+                "fish_cmd": null
+            }
+        },
+        {
+            "id": "hcledit",
+            "name": "hcledit",
+            "description": "A command line editor for HCL",
+            "groups": [
+                "iac"
+            ],
+            "homepage": "https://github.com/minamijoyo/hcledit",
+            "version_source": {
+                "type": "github_release",
+                "repo": "minamijoyo/hcledit"
+            },
+            "strategy": {
+                "type": "github_release",
+                "url_template": "https://github.com/minamijoyo/hcledit/releases/download/v{version}/hcledit_{version}_{os}_{arch}.tar.gz",
+                "binary_in_archive": "hcledit"
+            }
+        },
+        {
+            "id": "terraform-docs",
+            "name": "terraform-docs",
+            "description": "Generate documentation from Terraform modules",
+            "groups": [
+                "iac"
+            ],
+            "homepage": "https://terraform-docs.io",
+            "brew_formula": "terraform-docs",
+            "version_source": {
+                "type": "github_release",
+                "repo": "terraform-docs/terraform-docs"
+            },
+            "strategy": {
+                "type": "github_release",
+                "url_template": "https://github.com/terraform-docs/terraform-docs/releases/download/v{version}/terraform-docs-v{version}-{os}-{arch}.tar.gz",
+                "binary_in_archive": "terraform-docs"
+            },
+            "shell_completions": {
+                "bash_cmd": "source <(terraform-docs completion bash)",
+                "zsh_cmd": "source <(terraform-docs completion zsh)",
+                "fish_cmd": "terraform-docs completion fish | source"
             }
         },
         {
@@ -152,6 +241,29 @@
                 "bash_cmd": "complete -C vault vault",
                 "zsh_cmd": "complete -C vault vault",
                 "fish_cmd": null
+            }
+        },
+        {
+            "id": "yq",
+            "name": "yq",
+            "description": "Portable command-line YAML, JSON, XML and CSV processor",
+            "groups": [
+                "utils"
+            ],
+            "homepage": "https://github.com/mikefarah/yq",
+            "brew_formula": "yq",
+            "version_source": {
+                "type": "github_release",
+                "repo": "mikefarah/yq"
+            },
+            "strategy": {
+                "type": "direct_binary",
+                "url_template": "https://github.com/mikefarah/yq/releases/download/v{version}/yq_{os}_{arch}"
+            },
+            "shell_completions": {
+                "bash_cmd": "source <(yq shell-completion bash)",
+                "zsh_cmd": "source <(yq shell-completion zsh)",
+                "fish_cmd": "yq shell-completion fish | source"
             }
         },
         {
