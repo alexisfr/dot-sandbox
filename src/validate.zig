@@ -1,11 +1,11 @@
 const std = @import("std");
 
-const MAX_ID_LEN = 64;
-const MAX_VERSION_LEN = 64;
+const max_id_len = 64;
+const max_version_len = 64;
 
 /// Tool IDs: lowercase alphanumeric, hyphens, underscores only. Max 64 chars.
 pub fn isValidToolId(id: []const u8) bool {
-    if (id.len == 0 or id.len > MAX_ID_LEN) return false;
+    if (id.len == 0 or id.len > max_id_len) return false;
     for (id) |c| {
         if (!std.ascii.isAlphanumeric(c) and c != '-' and c != '_') return false;
     }
@@ -14,7 +14,7 @@ pub fn isValidToolId(id: []const u8) bool {
 
 /// Version strings: alphanumeric, dots, hyphens, plus. No path separators or spaces.
 pub fn isValidVersion(v: []const u8) bool {
-    if (v.len == 0 or v.len > MAX_VERSION_LEN) return false;
+    if (v.len == 0 or v.len > max_version_len) return false;
     for (v) |c| {
         if (!std.ascii.isAlphanumeric(c) and c != '.' and c != '-' and c != '+') return false;
     }

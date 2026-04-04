@@ -4,7 +4,7 @@ const tool_mod = @import("../tool.zig");
 const state_mod = @import("../state.zig");
 const output = @import("../ui/output.zig");
 
-const HELP =
+const help =
     \\Usage: dot list [--group <group>]
     \\
     \\List all tools with their install status.
@@ -22,12 +22,12 @@ const HELP =
 ;
 
 // Fixed column widths (visual chars)
-const COL_ID: usize = 16;
-const COL_GROUPS: usize = 16;
+const col_id: usize = 16;
+const col_groups: usize = 16;
 // Overhead: id(16) + sp(1) + status(14) + sp(1) + groups(16) + sp(1) = 49
 // Description is rightmost — no reserve needed, gets all remaining space
-const OVERHEAD: usize = 49;
-const DESC_MIN: usize = 10;
+const overhead: usize = 49;
+const desc_min: usize = 10;
 
 fn getTermWidth() usize {
     if (comptime builtin.os.tag == .linux) {
@@ -48,7 +48,7 @@ pub fn run(
 ) !void {
     for (args) |a| {
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
-            output.printRaw(HELP);
+            output.printRaw(help);
             return;
         }
     }
@@ -65,7 +65,7 @@ pub fn run(
     }
 
     const term_width = getTermWidth();
-    const desc_width = if (term_width > OVERHEAD) term_width - OVERHEAD else DESC_MIN;
+    const desc_width = if (term_width > overhead) term_width - overhead else desc_min;
 
     printListHeader(term_width);
 
@@ -101,13 +101,13 @@ pub fn run(
 // ─── List-specific print functions ────────────────────────────────────────────
 
 fn printListHeader(term_width: usize) void {
-    std.debug.print("\n{s}{s}Available Tools{s}\n\n", .{ output.CYAN, output.BOLD, output.RESET });
+    std.debug.print("\n{s}{s}Available Tools{s}\n\n", .{ output.cyan, output.bold, output.reset });
     std.debug.print("{s}{s:<16} {s:<14} {s:<16} Description{s}\n", .{
-        output.BOLD, "Tool", "Status", "Groups", output.RESET,
+        output.bold, "Tool", "Status", "Groups", output.reset,
     });
-    std.debug.print("{s}", .{output.DIM});
-    for (0..@min(term_width, 200)) |_| std.debug.print("{s}", .{output.SYM_DASH});
-    std.debug.print("{s}\n", .{output.RESET});
+    std.debug.print("{s}", .{output.dim});
+    for (0..@min(term_width, 200)) |_| std.debug.print("{s}", .{output.sym_dash});
+    std.debug.print("{s}\n", .{output.reset});
 }
 
 /// Truncate desc to at most max_visual visual chars, breaking at a word boundary
@@ -137,8 +137,8 @@ fn isSystemInstalled(allocator: std.mem.Allocator, id: []const u8) bool {
 }
 
 fn printListRow(id: []const u8, aliases: []const []const u8, desc: []const u8, version: ?[]const u8, sys: bool, groups: []const u8, desc_width: usize) void {
-    // id column: "kubectl" or "kubectl (k)" dimmed, padded to COL_ID visual chars
-    const id_trunc = id[0..@min(id.len, COL_ID)];
+    // id column: "kubectl" or "kubectl (k)" dimmed, padded to col_id visual chars
+    const id_trunc = id[0..@min(id.len, col_id)];
     if (aliases.len > 0) {
         // Build alias string e.g. "(k)" or "(k,tf)"
         var alias_buf: [32]u8 = undefined;
@@ -154,8 +154,8 @@ fn printListRow(id: []const u8, aliases: []const []const u8, desc: []const u8, v
 
         // Visual width: id + 1 space + alias_str
         const visual = id_trunc.len + 1 + alias_str.len;
-        const pad = if (COL_ID + 1 > visual) COL_ID + 1 - visual else 0;
-        std.debug.print("{s} {s}{s}{s}", .{ id_trunc, output.DIM, alias_str, output.RESET });
+        const pad = if (col_id + 1 > visual) col_id + 1 - visual else 0;
+        std.debug.print("{s} {s}{s}{s}", .{ id_trunc, output.dim, alias_str, output.reset });
         for (0..pad) |_| std.debug.print(" ", .{});
     } else {
         std.debug.print("{s:<16} ", .{id_trunc});
@@ -164,15 +164,15 @@ fn printListRow(id: []const u8, aliases: []const []const u8, desc: []const u8, v
     // status column: 14 visual chars + 1 trailing space = 15 total
     if (version) |v| {
         const v_trunc = v[0..@min(v.len, 12)];
-        std.debug.print("{s}{s} {s:<12}{s} ", .{ output.GREEN, output.SYM_OK, v_trunc, output.RESET });
+        std.debug.print("{s}{s} {s:<12}{s} ", .{ output.green, output.sym_ok, v_trunc, output.reset });
     } else if (sys) {
-        std.debug.print("{s}{s} {s:<12}{s} ", .{ output.YELLOW, output.SYM_WARN, "system", output.RESET });
+        std.debug.print("{s}{s} {s:<12}{s} ", .{ output.yellow, output.sym_warn, "system", output.reset });
     } else {
-        std.debug.print("{s}not installed{s}  ", .{ output.DIM, output.RESET });
+        std.debug.print("{s}not installed{s}  ", .{ output.dim, output.reset });
     }
 
-    // groups column — ASCII, byte-pad fine; truncate if somehow over COL_GROUPS
-    const g_trunc = groups[0..@min(groups.len, COL_GROUPS)];
+    // groups column — ASCII, byte-pad fine; truncate if somehow over col_groups
+    const g_trunc = groups[0..@min(groups.len, col_groups)];
     std.debug.print("{s:<16} ", .{g_trunc});
 
     // description — rightmost, no padding needed; truncate to fit terminal

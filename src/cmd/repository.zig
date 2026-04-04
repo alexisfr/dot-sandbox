@@ -4,7 +4,7 @@ const loader = @import("../repository/loader.zig");
 const http = @import("../http.zig");
 const output = @import("../ui/output.zig");
 
-const HELP =
+const help =
     \\Usage: dot repository <subcommand> [args]
     \\
     \\Manage external tool repositories.
@@ -28,13 +28,13 @@ pub fn run(allocator: std.mem.Allocator, args: []const []const u8, state: *state
     _ = state;
 
     if (args.len == 0) {
-        output.printRaw(HELP);
+        output.printRaw(help);
         return;
     }
 
     for (args) |a| {
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
-            output.printRaw(HELP);
+            output.printRaw(help);
             return;
         }
     }
@@ -65,14 +65,14 @@ fn cmdAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     std.debug.print("Fetching repository from {s}...\n", .{url});
 
     const body = http.get(allocator, url) catch |e| {
-        output.printFmt("{s}Error:{s} could not fetch repository: {s}\n", .{ output.RED, output.RESET, @errorName(e) });
+        output.printFmt("{s}Error:{s} could not fetch repository: {s}\n", .{ output.red, output.reset, @errorName(e) });
         return;
     };
     defer allocator.free(body);
 
     // Parse name from JSON
     const name = loader.parseNameFromJson(allocator, body) catch |e| {
-        output.printFmt("{s}Error:{s} repository JSON missing 'name' field ({s})\n", .{ output.RED, output.RESET, @errorName(e) });
+        output.printFmt("{s}Error:{s} repository JSON missing 'name' field ({s})\n", .{ output.red, output.reset, @errorName(e) });
         return;
     };
     defer allocator.free(name);
@@ -87,7 +87,7 @@ fn cmdAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const existing = loader.loadRepositories(aa, allocator) catch &.{};
     for (existing) |s| {
         if (std.mem.eql(u8, s.name, name)) {
-            output.printFmt("{s}Error:{s} repository '{s}' already added\n", .{ output.RED, output.RESET, name });
+            output.printFmt("{s}Error:{s} repository '{s}' already added\n", .{ output.red, output.reset, name });
             return;
         }
     }
@@ -122,7 +122,7 @@ fn cmdAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     try loader.saveRepositories(allocator, new_sources.items);
 
     std.debug.print("{s}{s}{s} Added repository '{s}' — {d} tools available\n", .{
-        output.GREEN, output.SYM_OK, output.RESET, name, tool_count,
+        output.green, output.sym_ok, output.reset, name, tool_count,
     });
 }
 
@@ -139,13 +139,13 @@ fn cmdList(allocator: std.mem.Allocator) !void {
         return;
     }
 
-    std.debug.print("\n{s}{s}External Repositories{s}\n\n", .{ output.CYAN, output.BOLD, output.RESET });
+    std.debug.print("\n{s}{s}External Repositories{s}\n\n", .{ output.cyan, output.bold, output.reset });
     std.debug.print("{s}{s:<20} {s:<8} {s:<24} {s}{s}\n", .{
-        output.BOLD, "Name", "Tools", "Last Fetched", "URL", output.RESET,
+        output.bold, "Name", "Tools", "Last Fetched", "URL", output.reset,
     });
-    std.debug.print("{s}", .{output.DIM});
-    for (0..80) |_| std.debug.print("{s}", .{output.SYM_DASH});
-    std.debug.print("{s}\n", .{output.RESET});
+    std.debug.print("{s}", .{output.dim});
+    for (0..80) |_| std.debug.print("{s}", .{output.sym_dash});
+    std.debug.print("{s}\n", .{output.reset});
 
     for (sources) |s| {
         // Count tools from cache
@@ -211,7 +211,7 @@ fn cmdRemove(allocator: std.mem.Allocator, args: []const []const u8) !void {
     }
 
     if (!found) {
-        output.printFmt("{s}Error:{s} repository '{s}' not found\n", .{ output.RED, output.RESET, name });
+        output.printFmt("{s}Error:{s} repository '{s}' not found\n", .{ output.red, output.reset, name });
         return;
     }
 
@@ -228,7 +228,7 @@ fn cmdRemove(allocator: std.mem.Allocator, args: []const []const u8) !void {
         std.fs.cwd().deleteFile(path) catch {};
     }
 
-    std.debug.print("{s}{s}{s} Removed repository '{s}'\n", .{ output.GREEN, output.SYM_OK, output.RESET, name });
+    std.debug.print("{s}{s}{s} Removed repository '{s}'\n", .{ output.green, output.sym_ok, output.reset, name });
 }
 
 fn cmdUpdate(allocator: std.mem.Allocator, args: []const []const u8) !void {
@@ -253,7 +253,7 @@ fn cmdUpdate(allocator: std.mem.Allocator, args: []const []const u8) !void {
         std.debug.print("Updating '{s}'...\n", .{s.name});
         loader.fetchAndCache(allocator, s.name, s.url) catch |e| {
             std.debug.print("{s}{s}{s} {s}: fetch failed ({s}) — using cached\n", .{
-                output.RED, output.SYM_FAIL, output.RESET, s.name, @errorName(e),
+                output.red, output.sym_fail, output.reset, s.name, @errorName(e),
             });
             continue;
         };
@@ -274,7 +274,7 @@ fn cmdUpdate(allocator: std.mem.Allocator, args: []const []const u8) !void {
         };
 
         std.debug.print("{s}{s}{s} {s}: {d} tools\n", .{
-            output.GREEN, output.SYM_OK, output.RESET, s.name, tool_count,
+            output.green, output.sym_ok, output.reset, s.name, tool_count,
         });
     }
 }

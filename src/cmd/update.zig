@@ -8,7 +8,7 @@ const tool_mod = @import("../tool.zig");
 const version_mod = @import("../version.zig");
 const progress_mod = @import("../ui/progress.zig");
 
-const HELP =
+const help =
     \\Usage: dot update [--force]
     \\
     \\Update dot itself to the latest release from GitHub.
@@ -31,49 +31,49 @@ pub fn run(
     var force = false;
     for (args) |a| {
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
-            output.printRaw(HELP);
+            output.printRaw(help);
             return;
         }
         if (std.mem.eql(u8, a, "--force")) force = true;
     }
 
     // Resolve latest version from GitHub
-    std.debug.print("{s} Checking latest dot version...\n", .{output.SYM_SEARCH});
-    const vs = tool_mod.VersionSource{ .github_release = .{ .repo = version_mod.GITHUB_REPO } };
+    std.debug.print("{s} Checking latest dot version...\n", .{output.sym_search});
+    const vs = tool_mod.VersionSource{ .github_release = .{ .repo = version_mod.github_repo } };
     const latest = vs.resolve(allocator) catch |e| {
-        const api_url = "https://api.github.com/repos/" ++ version_mod.GITHUB_REPO ++ "/releases";
+        const api_url = "https://api.github.com/repos/" ++ version_mod.github_repo ++ "/releases";
         switch (e) {
             error.VersionFetchFailed => {
-                output.printFmt("{s}Error:{s} could not reach GitHub API\n", .{ output.RED, output.RESET });
+                output.printFmt("{s}Error:{s} could not reach GitHub API\n", .{ output.red, output.reset });
                 std.debug.print("  URL: {s}\n", .{api_url});
                 std.debug.print("  The repository may be private, or you may be offline.\n", .{});
             },
             error.VersionNotFound => {
-                output.printFmt("{s}Error:{s} no stable releases found\n", .{ output.RED, output.RESET });
+                output.printFmt("{s}Error:{s} no stable releases found\n", .{ output.red, output.reset });
                 std.debug.print("  URL: {s}\n", .{api_url});
                 std.debug.print("  No releases have been published yet.\n", .{});
             },
             error.VersionParseFailed => {
-                output.printFmt("{s}Error:{s} unexpected response from GitHub API\n", .{ output.RED, output.RESET });
+                output.printFmt("{s}Error:{s} unexpected response from GitHub API\n", .{ output.red, output.reset });
                 std.debug.print("  URL: {s}\n", .{api_url});
             },
-            else => output.printFmt("{s}Error:{s} {s}\n", .{ output.RED, output.RESET, @errorName(e) }),
+            else => output.printFmt("{s}Error:{s} {s}\n", .{ output.red, output.reset, @errorName(e) }),
         }
         return;
     };
     defer allocator.free(latest);
 
-    const current = version_mod.CURRENT;
+    const current = version_mod.current;
 
     if (!force and std.mem.eql(u8, current, latest)) {
         std.debug.print("\n{s}{s}{s} dot {s} — already up to date\n\n", .{
-            output.GREEN, output.SYM_CHECK, output.RESET, current,
+            output.green, output.sym_check, output.reset, current,
         });
         return;
     }
 
     std.debug.print("\n{s} {s}Updating dot{s} {s} → {s}\n\n", .{
-        output.SYM_INSTALL, output.BOLD, output.RESET, current, latest,
+        output.sym_install, output.bold, output.reset, current, latest,
     });
 
     const os = platform.Os.current();
@@ -82,7 +82,7 @@ pub fn run(
     const url = try std.fmt.allocPrint(
         allocator,
         "https://github.com/{s}/releases/download/v{s}/dot-{s}-{s}.tar.gz",
-        .{ version_mod.GITHUB_REPO, latest, os.name(), arch.goName() },
+        .{ version_mod.github_repo, latest, os.name(), arch.goName() },
     );
     defer allocator.free(url);
 
@@ -102,7 +102,7 @@ pub fn run(
     output.printDownloading(url);
     http.download(allocator, url, archive_path, progress) catch |e| {
         bar.finish();
-        output.printStep("Download", output.SYM_FAIL, @errorName(e));
+        output.printStep("Download", output.sym_fail, @errorName(e));
         output.printError("Download failed");
         return e;
     };
@@ -114,7 +114,7 @@ pub fn run(
 
     output.printStepStart("Extracting", filename);
     archive.extractTarGz(archive_path, extract_dir, 0) catch |e| {
-        output.printStep("Extracting", output.SYM_FAIL, @errorName(e));
+        output.printStep("Extracting", output.sym_fail, @errorName(e));
         output.printError("Extraction failed");
         return e;
     };
@@ -135,7 +135,7 @@ pub fn run(
     defer allocator.free(src_bin);
 
     std.fs.cwd().copyFile(src_bin, std.fs.cwd(), tmp_dest, .{}) catch |e| {
-        output.printStep("Install", output.SYM_FAIL, @errorName(e));
+        output.printStep("Install", output.sym_fail, @errorName(e));
         output.printError("Could not write binary");
         return e;
     };
@@ -148,19 +148,19 @@ pub fn run(
     allocator.free(chmod.stderr);
 
     std.fs.rename(std.fs.cwd(), tmp_dest, std.fs.cwd(), dest) catch |e| {
-        output.printStep("Install", output.SYM_FAIL, @errorName(e));
+        output.printStep("Install", output.sym_fail, @errorName(e));
         output.printError("Could not replace binary");
         return e;
     };
 
-    output.printStep("Installed", output.SYM_OK, dest);
+    output.printStep("Installed", output.sym_ok, dest);
 
     // Update state
     try state.addTool("dot", latest, "github_release", false);
 
     std.debug.print("\n{s}{s}{s} dot updated to {s}{s}{s}!\n\n", .{
-        output.GREEN, output.SYM_CHECK, output.RESET,
-        output.BOLD, latest,                output.RESET,
+        output.green, output.sym_check, output.reset,
+        output.bold, latest,                output.reset,
     });
 }
 

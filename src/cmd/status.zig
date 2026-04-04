@@ -4,7 +4,7 @@ const output = @import("../ui/output.zig");
 const http = @import("../http.zig");
 const dot_version = @import("../version.zig");
 
-const HELP =
+const help =
     \\Usage: dot status
     \\
     \\Show all tools currently installed by dot, with version,
@@ -18,13 +18,13 @@ const HELP =
 // ─── Status-specific print functions ──────────────────────────────────────────
 
 fn printStatusHeader() void {
-    std.debug.print("\n{s}{s}Installed Tools{s}\n\n", .{ output.CYAN, output.BOLD, output.RESET });
+    std.debug.print("\n{s}{s}Installed Tools{s}\n\n", .{ output.cyan, output.bold, output.reset });
     std.debug.print("{s}{s:<16} {s:<16} {s:<24} {s}{s}\n", .{
-        output.BOLD, "Tool", "Version", "Installed At", "Method", output.RESET,
+        output.bold, "Tool", "Version", "Installed At", "Method", output.reset,
     });
-    std.debug.print("{s}", .{output.DIM});
-    for (0..72) |_| std.debug.print("{s}", .{output.SYM_DASH});
-    std.debug.print("{s}\n", .{output.RESET});
+    std.debug.print("{s}", .{output.dim});
+    for (0..72) |_| std.debug.print("{s}", .{output.sym_dash});
+    std.debug.print("{s}\n", .{output.reset});
 }
 
 fn printStatusEmpty() void {
@@ -35,7 +35,7 @@ fn printStatusEmpty() void {
 fn printStatusRow(id: []const u8, version: []const u8, installed_at: []const u8, method: []const u8) void {
     const at_trunc = installed_at[0..@min(installed_at.len, 23)];
     std.debug.print("{s:<16} {s}{s:<16}{s} {s:<24} {s}\n", .{
-        id, output.GREEN, version, output.RESET, at_trunc, method,
+        id, output.green, version, output.reset, at_trunc, method,
     });
 }
 
@@ -70,7 +70,7 @@ test "formatTimestamp" {
 }
 
 fn checkDotUpdate(allocator: std.mem.Allocator) void {
-    const url = "https://api.github.com/repos/" ++ dot_version.GITHUB_REPO ++ "/releases/latest";
+    const url = "https://api.github.com/repos/" ++ dot_version.github_repo ++ "/releases/latest";
     const body = http.get(allocator, url) catch return;
     defer allocator.free(body);
 
@@ -82,8 +82,8 @@ fn checkDotUpdate(allocator: std.mem.Allocator) void {
     if (tag.len == 0) return;
     const latest = if (tag[0] == 'v') tag[1..] else tag;
 
-    if (!std.mem.eql(u8, latest, dot_version.CURRENT)) {
-        std.debug.print("\n{s}ℹ{s}  dot v{s} available → https://github.com/" ++ dot_version.GITHUB_REPO ++ "/releases\n\n", .{ output.CYAN, output.RESET, latest });
+    if (!std.mem.eql(u8, latest, dot_version.current)) {
+        std.debug.print("\n{s}ℹ{s}  dot v{s} available → https://github.com/" ++ dot_version.github_repo ++ "/releases\n\n", .{ output.cyan, output.reset, latest });
     }
 }
 
@@ -95,7 +95,7 @@ pub fn run(
 
     for (args) |a| {
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
-            output.printRaw(HELP);
+            output.printRaw(help);
             return;
         }
     }
@@ -116,12 +116,12 @@ pub fn run(
         keys[n] = kv.key_ptr.*;
         n += 1;
     }
-    const Cmp = struct {
+    const cmp = struct {
         fn lt(_: void, a: []const u8, b: []const u8) bool {
             return std.mem.lessThan(u8, a, b);
         }
     };
-    std.mem.sort([]const u8, keys[0..n], {}, Cmp.lt);
+    std.mem.sort([]const u8, keys[0..n], {}, cmp.lt);
 
     for (keys[0..n]) |k| {
         const t = state.tools.get(k).?;

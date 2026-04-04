@@ -160,6 +160,7 @@
                 "iac"
             ],
             "homepage": "https://github.com/minamijoyo/hcledit",
+            "brew_formula": "hcledit",
             "version_source": {
                 "type": "github_release",
                 "repo": "minamijoyo/hcledit"

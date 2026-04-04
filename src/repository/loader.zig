@@ -2,9 +2,9 @@ const std = @import("std");
 const tool = @import("../tool.zig");
 const http = @import("../http.zig");
 
-const BUILTIN_REPO_NAME = "the-devops-hub";
-const BUILTIN_REPO_URL = "https://raw.githubusercontent.com/the-devops-hub/dot/main/src/repository/builtin-repository.json";
-const BUILTIN_REPO_BYTES: []const u8 = @embedFile("builtin-repository.json");
+const builtin_repo_name = "the-devops-hub";
+const builtin_repo_url = "https://raw.githubusercontent.com/the-devops-hub/dot/main/src/repository/builtin-repository.json";
+const builtin_repo_bytes: []const u8 = @embedFile("builtin-repository.json");
 
 /// Load built-in tools. Uses cached online version when fresh; falls back to
 /// the embedded repository.json compiled into the binary.
@@ -16,7 +16,7 @@ pub fn loadBuiltinTools(allocator: std.mem.Allocator) !ExternalTools {
     // Determine staleness from cache file mtime
     const dir_path = try configDir(allocator);
     defer allocator.free(dir_path);
-    const cache_filename = "repository-" ++ BUILTIN_REPO_NAME ++ ".json";
+    const cache_filename = "repository-" ++ builtin_repo_name ++ ".json";
     const cache_path = try std.fs.path.join(allocator, &.{ dir_path, cache_filename });
     defer allocator.free(cache_path);
 
@@ -31,16 +31,16 @@ pub fn loadBuiltinTools(allocator: std.mem.Allocator) !ExternalTools {
 
     if (stale) {
         // Try to refresh in the background; ignore network errors silently
-        fetchAndCache(allocator, BUILTIN_REPO_NAME, BUILTIN_REPO_URL) catch {};
+        fetchAndCache(allocator, builtin_repo_name, builtin_repo_url) catch {};
     }
 
     // Try to use the cached file (freshly fetched or previously cached)
-    if (loadCachedTools(aa, allocator, BUILTIN_REPO_NAME)) |tools| {
+    if (loadCachedTools(aa, allocator, builtin_repo_name)) |tools| {
         return ExternalTools{ .arena = arena, .tools = tools };
     } else |_| {}
 
     // Fall back to the embedded JSON
-    const tools = parseRepositoryJson(aa, allocator, BUILTIN_REPO_BYTES) catch
+    const tools = parseRepositoryJson(aa, allocator, builtin_repo_bytes) catch
         try aa.alloc(tool.Tool, 0);
     return ExternalTools{ .arena = arena, .tools = tools };
 }
@@ -577,12 +577,12 @@ test "countToolsInJson: counts correctly" {
     try std.testing.expectEqual(@as(usize, 3), n);
 }
 
-test "BUILTIN_REPO_BYTES: parses all 16 built-in tools" {
+test "builtin_repo_bytes: parses all 19 built-in tools" {
     var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
     var arena_inst = std.heap.ArenaAllocator.init(alloc);
     defer arena_inst.deinit();
-    const tools = try parseRepositoryJson(arena_inst.allocator(), alloc, BUILTIN_REPO_BYTES);
+    const tools = try parseRepositoryJson(arena_inst.allocator(), alloc, builtin_repo_bytes);
     try std.testing.expectEqual(@as(usize, 19), tools.len);
 }

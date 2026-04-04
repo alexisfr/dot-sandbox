@@ -13,7 +13,7 @@ fn findInTools(id: []const u8, tools: []const tool_mod.Tool) bool {
     return false;
 }
 
-const HELP =
+const help =
     \\Usage: dot uninstall <tool>
     \\       dot remove <tool>
     \\
@@ -46,13 +46,13 @@ pub fn run(
     tools: []const tool_mod.Tool,
 ) !void {
     if (args.len == 0) {
-        output.printRaw(HELP);
+        output.printRaw(help);
         return;
     }
 
     for (args) |a| {
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
-            output.printRaw(HELP);
+            output.printRaw(help);
             return;
         }
     }
@@ -83,15 +83,25 @@ pub fn run(
         error.FileNotFound => {}, // already gone, that's fine
         else => output.printWarning("could not remove binary"),
     };
-    output.printStep("Cleanup", output.SYM_OK, bin_path);
+    output.printStep("Cleanup", output.sym_ok, bin_path);
 
     // Remove shell integration section from all known shells, not just the active one.
     // A tool may have been installed under a different shell than the one currently running.
+    var any_removed = false;
     const all_shells = [_]platform.Shell{ .bash, .zsh, .fish };
     for (all_shells) |sh| {
-        shell_mod.removeSection(sh, id, allocator) catch {};
+        const integ_path = std.fs.path.join(allocator, &.{
+            home, ".local", "bin", sh.integrationFileName(),
+        }) catch continue;
+        defer allocator.free(integ_path);
+        if (std.fs.cwd().access(integ_path, .{})) |_| {
+            shell_mod.removeSection(sh, id, allocator) catch {};
+            any_removed = true;
+        } else |_| {}
     }
-    output.printStep("Shell", output.SYM_OK, "removed");
+    if (any_removed) {
+        output.printStep("Shell", output.sym_ok, "removed");
+    }
 
     // Update state
     try state.removeTool(id);
@@ -102,7 +112,7 @@ pub fn run(
 // ─── Uninstall-specific print functions ───────────────────────────────────────
 
 fn printToolUninstalled(id: []const u8) void {
-    std.debug.print("\n{s}{s}{s} {s}{s}{s} uninstalled\n\n", .{ output.GREEN, output.SYM_CHECK, output.RESET, output.BOLD, id, output.RESET });
+    std.debug.print("\n{s}{s}{s} {s}{s}{s} uninstalled\n\n", .{ output.green, output.sym_check, output.reset, output.bold, id, output.reset });
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@ const std = @import("std");
 const output = @import("output.zig");
 
 /// Minimum milliseconds between redraws. Prevents flickering on fast connections.
-const REDRAW_INTERVAL_MS: i64 = 50; // 20 fps max
+const redraw_interval_ms: i64 = 50; // 20 fps max
 
 /// Simple in-place progress bar printed to stderr using \r.
 /// Call `update(current, total, detail)` each chunk, then `finish()` when done.
@@ -32,8 +32,8 @@ pub const ProgressBar = struct {
         if (mode == .rich or mode == .plain) {
             const now = std.time.milliTimestamp();
             const at_100 = if (total) |t| current >= t else false;
-            // Always draw at 100%; otherwise throttle to REDRAW_INTERVAL_MS.
-            if (at_100 or now - self.last_draw_ms >= REDRAW_INTERVAL_MS) {
+            // Always draw at 100%; otherwise throttle to redraw_interval_ms.
+            if (at_100 or now - self.last_draw_ms >= redraw_interval_ms) {
                 self.last_draw_ms = now;
                 renderBar(self, current, total, detail);
             }
@@ -74,12 +74,12 @@ pub const ProgressBar = struct {
             const total_str = fmtBytes(t, &total_buf);
 
             const is_done = current >= t;
-            const status_sym = if (is_done) output.SYM_OK else output.SYM_ARROW;
-            const status_color = if (is_done) output.GREEN else output.YELLOW;
+            const status_sym = if (is_done) output.sym_ok else output.sym_arrow;
+            const status_color = if (is_done) output.green else output.yellow;
 
             w.print("{s}{s} {s}{s:<14}{s} [{s}{s}{s}] [", .{
-                line_start, prefix, output.CYAN, self.step, output.RESET,
-                status_color, status_sym, output.RESET,
+                line_start, prefix, output.cyan, self.step, output.reset,
+                status_color, status_sym, output.reset,
             }) catch return;
             for (0..filled) |_| w.writeAll(fill) catch return;
             for (0..n_empty) |_| w.writeAll(empty_ch) catch return;
@@ -89,8 +89,8 @@ pub const ProgressBar = struct {
             const done_str = fmtBytes(current, &done_buf);
 
             w.print("{s}{s} {s}{s:<14}{s} [{s}{s}{s}] [", .{
-                line_start, prefix, output.CYAN, self.step, output.RESET,
-                output.YELLOW, output.SYM_ARROW, output.RESET,
+                line_start, prefix, output.cyan, self.step, output.reset,
+                output.yellow, output.sym_arrow, output.reset,
             }) catch return;
             for (0..self.width) |_| w.writeAll(fill) catch return;
             w.print("]  --   {s}{s}", .{ done_str, detail }) catch return;
@@ -113,7 +113,7 @@ pub const ProgressBar = struct {
                 var bytes_buf: [32]u8 = undefined;
                 const final_bytes = self.bytes_total orelse self.bytes_done;
                 const detail = fmtBytes(final_bytes, &bytes_buf);
-                output.printStep(self.step, output.SYM_OK, detail);
+                output.printStep(self.step, output.sym_ok, detail);
             },
             .rich => {
                 // Erase any stale trailing characters from a previously-longer

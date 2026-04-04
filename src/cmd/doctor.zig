@@ -4,7 +4,7 @@ const tool_mod = @import("../tool.zig");
 const platform = @import("../platform.zig");
 const output = @import("../ui/output.zig");
 
-const HELP =
+const help =
     \\Usage: dot doctor
     \\
     \\Run a system health check. Reports:
@@ -22,31 +22,31 @@ const HELP =
 // ─── Doctor-specific print functions ──────────────────────────────────────────
 
 fn printDoctorHeader() void {
-    std.debug.print("\n{s}{s} Running system checks...{s}\n\n", .{ output.BOLD, output.SYM_SEARCH, output.RESET });
+    std.debug.print("\n{s}{s} Running system checks...{s}\n\n", .{ output.bold, output.sym_search, output.reset });
 }
 
 fn printDoctorSection(title: []const u8) void {
-    std.debug.print("\n{s}{s}:{s}\n", .{ output.CYAN, title, output.RESET });
+    std.debug.print("\n{s}{s}:{s}\n", .{ output.cyan, title, output.reset });
 }
 
 fn printCheckPass(label: []const u8, detail: []const u8) void {
-    std.debug.print("  {s}{s}{s} {s:<24} {s}\n", .{ output.GREEN, output.SYM_OK, output.RESET, label, detail });
+    std.debug.print("  {s}{s}{s} {s:<24} {s}\n", .{ output.green, output.sym_ok, output.reset, label, detail });
 }
 
 fn printCheckWarn(label: []const u8, detail: []const u8) void {
-    std.debug.print("  {s}{s}{s}  {s:<24} {s}\n", .{ output.YELLOW, output.SYM_WARN, output.RESET, label, detail });
+    std.debug.print("  {s}{s}{s}  {s:<24} {s}\n", .{ output.yellow, output.sym_warn, output.reset, label, detail });
 }
 
 fn printCheckFail(label: []const u8, detail: []const u8) void {
-    std.debug.print("  {s}{s}{s} {s:<24} {s}\n", .{ output.RED, output.SYM_FAIL, output.RESET, label, detail });
+    std.debug.print("  {s}{s}{s} {s:<24} {s}\n", .{ output.red, output.sym_fail, output.reset, label, detail });
 }
 
 fn printDoctorSummary(pass: usize, warn: usize, fail: usize) void {
     std.debug.print("\n{s}Summary:{s} {s}{d} passed{s}, {s}{d} warnings{s}, {s}{d} failed{s}\n\n", .{
-        output.BOLD,   output.RESET,
-        output.GREEN,  pass,  output.RESET,
-        output.YELLOW, warn,  output.RESET,
-        output.RED,    fail,  output.RESET,
+        output.bold,   output.reset,
+        output.green,  pass,  output.reset,
+        output.yellow, warn,  output.reset,
+        output.red,    fail,  output.reset,
     });
 }
 
@@ -72,7 +72,7 @@ fn extractSection(content: []const u8, tool_id: []const u8, allocator: std.mem.A
 /// Return true if the section contains a bare tool invocation not wrapped in a
 /// shell existence guard (`if command -q` for fish, `command -v` for bash/zsh).
 fn hasUnguardedInvocations(section: []const u8, tool_id: []const u8, shell: platform.Shell) bool {
-    var inside_guard = false;
+    var guard_depth: usize = 0;
     var lines = std.mem.splitScalar(u8, section, '\n');
     while (lines.next()) |line| {
         const t = std.mem.trim(u8, line, " \t\r");
@@ -81,10 +81,10 @@ fn hasUnguardedInvocations(section: []const u8, tool_id: []const u8, shell: plat
         switch (shell) {
             .fish => {
                 if (std.mem.startsWith(u8, t, "if command -q ")) {
-                    inside_guard = true;
+                    guard_depth += 1;
                 } else if (std.mem.eql(u8, t, "end")) {
-                    inside_guard = false;
-                } else if (!inside_guard and isInvocation(t, tool_id)) {
+                    if (guard_depth > 0) guard_depth -= 1;
+                } else if (guard_depth == 0 and isInvocation(t, tool_id)) {
                     return true;
                 }
             },
@@ -117,7 +117,7 @@ pub fn run(
 ) !void {
     for (args) |a| {
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
-            output.printRaw(HELP);
+            output.printRaw(help);
             return;
         }
     }
@@ -268,4 +268,71 @@ pub fn run(
     }
 
     printDoctorSummary(pass, warn, fail);
+}
+
+test "extractSection: present section" {
+    const allocator = std.testing.allocator;
+    const content = "# BEGIN HELM\nsome config\n# END HELM\n";
+    const result = extractSection(content, "helm", allocator);
+    try std.testing.expect(result != null);
+    defer allocator.free(result.?);
+    try std.testing.expectEqualStrings("some config\n", result.?);
+}
+
+test "extractSection: absent section" {
+    const allocator = std.testing.allocator;
+    const content = "no markers here";
+    const result = extractSection(content, "helm", allocator);
+    try std.testing.expect(result == null);
+}
+
+test "extractSection: end marker before begin" {
+    const allocator = std.testing.allocator;
+    const content = "# END HELM\n# BEGIN HELM\ncontent\n# END HELM\n";
+    // Should find the BEGIN and extract correctly
+    const result = extractSection(content, "helm", allocator);
+    try std.testing.expect(result != null);
+    defer allocator.free(result.?);
+    try std.testing.expectEqualStrings("content\n", result.?);
+}
+
+test "isInvocation: exact match" {
+    try std.testing.expect(isInvocation("helm version", "helm"));
+}
+
+test "isInvocation: prefix rejected" {
+    try std.testing.expect(!isInvocation("kubectl completion bash", "kube"));
+}
+
+test "isInvocation: alias line rejected" {
+    try std.testing.expect(!isInvocation("alias helm=helm3", "helm"));
+}
+
+test "isInvocation: tool alone" {
+    try std.testing.expect(isInvocation("helm", "helm"));
+}
+
+test "hasUnguardedInvocations: fish guarded" {
+    const section = "if command -q helm\n    source <(helm completion fish)\nend\n";
+    try std.testing.expect(!hasUnguardedInvocations(section, "helm", .fish));
+}
+
+test "hasUnguardedInvocations: fish unguarded" {
+    const section = "source <(helm completion fish)\n";
+    try std.testing.expect(hasUnguardedInvocations(section, "helm", .fish));
+}
+
+test "hasUnguardedInvocations: fish nested end does not escape guard" {
+    const section = "if command -q helm\n    if test -f foo\n    end\n    helm completion fish | source\nend\n";
+    try std.testing.expect(!hasUnguardedInvocations(section, "helm", .fish));
+}
+
+test "hasUnguardedInvocations: bash guarded" {
+    const section = "command -v helm >/dev/null 2>&1 && source <(helm completion bash)\n";
+    try std.testing.expect(!hasUnguardedInvocations(section, "helm", .bash));
+}
+
+test "hasUnguardedInvocations: bash unguarded" {
+    const section = "source <(helm completion bash)\n";
+    try std.testing.expect(hasUnguardedInvocations(section, "helm", .bash));
 }

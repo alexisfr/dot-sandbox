@@ -21,25 +21,25 @@ pub fn initCaps() void {
     render_mode = if (!is_tty) .pipe else if (no_color or dumb_term) .plain else .rich;
 
     if (render_mode != .rich) {
-        CYAN = "";
-        GREEN = "";
-        RED = "";
-        YELLOW = "";
-        DIM = "";
-        BOLD = "";
-        RESET = "";
-        SYM_OK = "ok";
-        SYM_FAIL = "FAIL";
-        SYM_WARN = "WARN";
-        SYM_CHECK = "[OK]";
-        SYM_PIN = "[PIN]";
-        SYM_LIST = "[INFO]";
-        SYM_BOOKS = "[DOC]";
-        SYM_LINK = "[LK]";
-        SYM_SEARCH = "[..]";
-        SYM_DASH = "-";
-        SYM_ARROW = "->";
-        SYM_INSTALL = "[IN]";
+        cyan = "";
+        green = "";
+        red = "";
+        yellow = "";
+        dim = "";
+        bold = "";
+        reset = "";
+        sym_ok = "ok";
+        sym_fail = "FAIL";
+        sym_warn = "WARN";
+        sym_check = "[OK]";
+        sym_pin = "[PIN]";
+        sym_list = "[INFO]";
+        sym_books = "[DOC]";
+        sym_link = "[LK]";
+        sym_search = "[..]";
+        sym_dash = "-";
+        sym_arrow = "->";
+        sym_install = "[IN]";
     }
 }
 
@@ -57,31 +57,31 @@ pub fn setRenderModeForTesting(mode: RenderMode) void {
 // cmd/ files import these variables rather than hardcoding escape sequences.
 // In plain/pipe mode, initCaps() sets these to empty strings.
 
-pub var CYAN: []const u8 = "\x1b[0;36m";
-pub var GREEN: []const u8 = "\x1b[1;32m";
-pub var RED: []const u8 = "\x1b[1;31m";
-pub var YELLOW: []const u8 = "\x1b[1;33m";
-pub var DIM: []const u8 = "\x1b[2m";
-pub var BOLD: []const u8 = "\x1b[1m";
-pub var RESET: []const u8 = "\x1b[0m";
+pub var cyan: []const u8 = "\x1b[0;36m";
+pub var green: []const u8 = "\x1b[1;32m";
+pub var red: []const u8 = "\x1b[1;31m";
+pub var yellow: []const u8 = "\x1b[1;33m";
+pub var dim: []const u8 = "\x1b[2m";
+pub var bold: []const u8 = "\x1b[1m";
+pub var reset: []const u8 = "\x1b[0m";
 
 // ─── Symbols / Emoji ─────────────────────────────────────────────────────────
 // initCaps() replaces these with ASCII equivalents in plain/pipe mode.
 
-pub var SYM_OK: []const u8 = "✓";
-pub var SYM_FAIL: []const u8 = "✗";
-pub var SYM_WARN: []const u8 = "⚠";
-pub var SYM_CHECK: []const u8 = "✅";
-pub var SYM_PIN: []const u8 = "📌";
-pub var SYM_LIST: []const u8 = "📋";
-pub var SYM_BOOKS: []const u8 = "📚";
-pub var SYM_LINK: []const u8 = "🔗";
-pub var SYM_SEARCH: []const u8 = "🔍";
-pub var SYM_DASH: []const u8 = "─";
+pub var sym_ok: []const u8 = "✓";
+pub var sym_fail: []const u8 = "✗";
+pub var sym_warn: []const u8 = "⚠";
+pub var sym_check: []const u8 = "✅";
+pub var sym_pin: []const u8 = "📌";
+pub var sym_list: []const u8 = "📋";
+pub var sym_books: []const u8 = "📚";
+pub var sym_link: []const u8 = "🔗";
+pub var sym_search: []const u8 = "🔍";
+pub var sym_dash: []const u8 = "─";
 /// Progress/in-flight indicator: "→" in rich mode, "->" in plain/pipe.
-pub var SYM_ARROW: []const u8 = "→";
+pub var sym_arrow: []const u8 = "→";
 /// Install action indicator: "🔧" in rich mode, "[IN]" in plain/pipe.
-pub var SYM_INSTALL: []const u8 = "🔧";
+pub var sym_install: []const u8 = "🔧";
 
 // ─── Common print functions ───────────────────────────────────────────────────
 
@@ -96,16 +96,16 @@ pub fn printFmt(comptime fmt: []const u8, args: anytype) void {
 }
 
 pub fn printWarning(msg: []const u8) void {
-    std.debug.print("  {s}{s}{s}  {s}\n", .{ YELLOW, SYM_WARN, RESET, msg });
+    std.debug.print("  {s}{s}{s}  {s}\n", .{ yellow, sym_warn, reset, msg });
 }
 
 pub fn printError(msg: []const u8) void {
-    std.debug.print("\n{s}{s}{s} {s}Error:{s} {s}\n\n", .{ RED, SYM_FAIL, RESET, BOLD, RESET, msg });
+    std.debug.print("\n{s}{s}{s} {s}Error:{s} {s}\n\n", .{ red, sym_fail, reset, bold, reset, msg });
 }
 
 /// Used by both install and upgrade commands.
 pub fn printUnknownTool(id: []const u8) void {
-    std.debug.print("{s}Error:{s} unknown tool '{s}'\n", .{ RED, RESET, id });
+    std.debug.print("{s}Error:{s} unknown tool '{s}'\n", .{ red, reset, id });
     std.debug.print("Run 'dot list' to see available tools\n", .{});
 }
 
@@ -154,22 +154,22 @@ fn stepPrefix(step: []const u8) []const u8 {
 pub fn printStep(step: []const u8, status: []const u8, detail: []const u8) void {
     if (render_mode == .silent) return;
     const prefix = stepPrefix(step);
-    const color = if (std.mem.eql(u8, status, SYM_OK))
-        GREEN
-    else if (std.mem.eql(u8, status, SYM_ARROW))
-        YELLOW
-    else if (std.mem.eql(u8, status, SYM_FAIL))
-        RED
+    const color = if (std.mem.eql(u8, status, sym_ok))
+        green
+    else if (std.mem.eql(u8, status, sym_arrow))
+        yellow
+    else if (std.mem.eql(u8, status, sym_fail))
+        red
     else
-        DIM;
+        dim;
 
     if (detail.len > 0) {
         std.debug.print("{s} {s}{s:<14}{s}  {s}{s}{s}  {s}\n", .{
-            prefix, BOLD, step, RESET, color, status, RESET, detail,
+            prefix, bold, step, reset, color, status, reset, detail,
         });
     } else {
         std.debug.print("{s} {s}{s:<14}{s}  {s}{s}{s}\n", .{
-            prefix, BOLD, step, RESET, color, status, RESET,
+            prefix, bold, step, reset, color, status, reset,
         });
     }
 }
@@ -181,7 +181,7 @@ pub fn printStepStart(step: []const u8, detail: []const u8) void {
     if (render_mode == .silent or render_mode == .pipe) return;
     const prefix = stepPrefix(step);
     std.debug.print("{s} {s}{s:<14}{s}  {s}…{s}  {s}", .{
-        prefix, BOLD, step, RESET, DIM, RESET, detail,
+        prefix, bold, step, reset, dim, reset, detail,
     }); // intentionally no \n — cursor stays on this line
 }
 
@@ -194,7 +194,7 @@ pub fn printStepDone(step: []const u8, detail: []const u8) void {
         .plain => std.debug.print("\r{s:<80}\r", .{""}),
         .pipe, .silent => {},
     }
-    printStep(step, SYM_OK, detail);
+    printStep(step, sym_ok, detail);
 }
 
 // ─── Install progress (called from strategy execute() in tool.zig) ────────────
@@ -215,7 +215,7 @@ pub fn printRunningCmd(cmd: []const u8, arg: []const u8) void {
 }
 
 pub fn printChecksumWarning(err_name: []const u8) void {
-    std.debug.print("   {s}Warning:{s} checksum verification failed: {s}\n", .{ YELLOW, RESET, err_name });
+    std.debug.print("   {s}Warning:{s} checksum verification failed: {s}\n", .{ yellow, reset, err_name });
 }
 
 pub fn printNoPackageManager(pm_name: []const u8) void {

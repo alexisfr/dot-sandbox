@@ -13,9 +13,9 @@ const repo = @import("repository/loader.zig");
 const tool_mod = @import("tool.zig");
 
 const version = @import("version.zig");
-const VERSION = "dot version " ++ version.CURRENT ++ "\n";
+const version_str = "dot version " ++ version.current ++ "\n";
 
-const HELP =
+const help =
     \\
     \\+--------------------------------------------------+
     \\|  dot — DevOps Toolbox v0.1.0                     |
@@ -46,19 +46,19 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
     output.initCaps(); // detect terminal capabilities before any output
 
     if (argv.len < 2) {
-        output.printRaw(HELP);
+        output.printRaw(help);
         return;
     }
 
     const command: []const u8 = argv[1];
 
     if (std.mem.eql(u8, command, "--version") or std.mem.eql(u8, command, "-v")) {
-        output.printRaw(VERSION);
+        output.printRaw(version_str);
         return;
     }
 
     if (std.mem.eql(u8, command, "--help") or std.mem.eql(u8, command, "-h") or std.mem.eql(u8, command, "help")) {
-        output.printRaw(HELP);
+        output.printRaw(help);
         return;
     }
 

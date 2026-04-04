@@ -21,7 +21,7 @@ pub fn parseUpgradeArgs(args: []const []const u8) UpgradeArgs {
     return result;
 }
 
-const HELP =
+const help =
     \\Usage: dot upgrade [tool|group] [--force]
     \\
     \\Upgrade installed tools to their latest available version.
@@ -58,7 +58,7 @@ pub fn run(
 ) !void {
     for (args) |a| {
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
-            output.printRaw(HELP);
+            output.printRaw(help);
             return;
         }
     }

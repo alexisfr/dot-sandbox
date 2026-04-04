@@ -1,9 +1,9 @@
 const std = @import("std");
 const platform = @import("platform.zig");
 
-const LOCAL_BIN = "~/.local/bin";
-const SOURCE_MARKER = "# SOURCE SHELL INTEGRATION";
-const PATH_MARKER = "# ADD LOCAL BIN TO PATH";
+const local_bin = "~/.local/bin";
+const source_marker = "# SOURCE SHELL INTEGRATION";
+const path_marker = "# ADD LOCAL BIN TO PATH";
 
 /// Ensure the centralized integration file is sourced from the shell's RC.
 /// Idempotent.
@@ -46,7 +46,7 @@ pub fn ensureSourced(shell: platform.Shell, allocator: std.mem.Allocator) !void 
     rc_content.close();
     defer allocator.free(content);
 
-    if (std.mem.indexOf(u8, content, SOURCE_MARKER) != null) {
+    if (std.mem.indexOf(u8, content, source_marker) != null) {
         // Already sourced — still normalize integration file to clean up any accumulated blank lines
         try normalizeIntegrationFile(integration_path, allocator);
         return;
@@ -252,12 +252,12 @@ fn buildSourceLine(shell: platform.Shell, integration_path: []const u8, allocato
         .fish => std.fmt.allocPrint(
             allocator,
             "\n{s}\nsource {s}\n",
-            .{ SOURCE_MARKER, integration_path },
+            .{ source_marker, integration_path },
         ),
         else => std.fmt.allocPrint(
             allocator,
             "\n{s}\nsource {s}\n",
-            .{ SOURCE_MARKER, integration_path },
+            .{ source_marker, integration_path },
         ),
     };
 }
@@ -276,7 +276,7 @@ fn ensurePathInIntegration(
     file.close();
     defer allocator.free(content);
 
-    if (std.mem.indexOf(u8, content, PATH_MARKER) != null) return;
+    if (std.mem.indexOf(u8, content, path_marker) != null) return;
 
     const bin_dir = try std.fs.path.join(allocator, &.{ home, ".local", "bin" });
     defer allocator.free(bin_dir);
@@ -284,7 +284,7 @@ fn ensurePathInIntegration(
     const path_line = try shell.pathAddSyntax(bin_dir, allocator);
     defer allocator.free(path_line);
 
-    const addition = try std.fmt.allocPrint(allocator, "\n{s}\n{s}\n", .{ PATH_MARKER, path_line });
+    const addition = try std.fmt.allocPrint(allocator, "\n{s}\n{s}\n", .{ path_marker, path_line });
     defer allocator.free(addition);
 
     try appendToFile(integration_path, addition);
