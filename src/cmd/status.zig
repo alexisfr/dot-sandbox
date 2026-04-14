@@ -71,7 +71,7 @@ test "formatTimestamp" {
     try std.testing.expectEqualStrings("bad", formatTimestamp("bad", &buf));
 }
 
-fn checkDotUpdate(allocator: std.mem.Allocator) void {
+fn checkDotUpdate(allocator: std.mem.Allocator, state: *state_mod.State) void {
     const url = "https://api.github.com/repos/" ++ dot_version.github_repo ++ "/releases/latest";
     const body = http.get(allocator, url) catch return;
     defer allocator.free(body);
@@ -84,7 +84,10 @@ fn checkDotUpdate(allocator: std.mem.Allocator) void {
     if (tag.len == 0) return;
     const latest = if (tag[0] == 'v') tag[1..] else tag;
 
-    if (!std.mem.eql(u8, latest, dot_version.current)) {
+    // Use the installed version from state if available, fall back to compiled-in version.
+    const installed = if (state.tools.get("dot")) |e| e.version else dot_version.current;
+
+    if (!std.mem.eql(u8, latest, installed)) {
         std.debug.print("\n{s}ℹ{s}  dot v{s} available → https://github.com/" ++ dot_version.github_repo ++ "/releases\n\n", .{ output.cyan, output.reset, latest });
     }
 }
@@ -105,7 +108,7 @@ pub fn run(
 
     if (state.tools.count() == 0) {
         printStatusEmpty();
-        checkDotUpdate(allocator);
+        checkDotUpdate(allocator, state);
         return;
     }
 
@@ -132,5 +135,5 @@ pub fn run(
     }
 
     printStatusFooter(state.tools.count());
-    checkDotUpdate(allocator);
+    checkDotUpdate(allocator, state);
 }

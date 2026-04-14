@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -e
 
-REPO="the-devops-hub/dot"
+REPO="${DOT_REPO:-the-devops-hub/dot}"
 BIN_DIR="${DOT_BIN_DIR:-$HOME/.local/bin}"
 
 # ── 1. Detect OS + arch ───────────────────────────────────────────────────────
