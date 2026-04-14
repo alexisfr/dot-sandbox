@@ -11,7 +11,7 @@ fi
 VERSION="${TAG#v}"
 
 # Extract version from src/version.zig
-CODE_VERSION=$(grep 'pub const CURRENT' src/version.zig | sed 's/.*"\(.*\)".*/\1/')
+CODE_VERSION=$(grep 'pub const current' src/version.zig | sed 's/.*"\(.*\)".*/\1/')
 
 if [[ "$VERSION" != "$CODE_VERSION" ]]; then
   echo "ERROR: Tag '$TAG' does not match version in src/version.zig ('$CODE_VERSION')"
