@@ -2,12 +2,7 @@
     .name = .dot,
     .fingerprint = 0x59278a35c075593,
     .version = "0.1.0",
-    .dependencies = .{
-        .zlinter = .{
-            .url = "git+https://github.com/kurtwagner/zlinter?ref=0.15.x#bd25a4ddffdb9afb542280b876c25a366faa38d8",
-            .hash = "zlinter-0.0.1-OjQ08ZOnCwBx9meqm2cUjOkYUBeTUpKhQ3ERnVPg6ARc",
-        },
-    },
+    .dependencies = .{},
     .minimum_zig_version = "0.15.2",
     .paths = .{"."},
 }
