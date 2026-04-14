@@ -193,10 +193,10 @@ pub const VersionSource = union(enum) {
 
 pub const InstallContext = struct {
     allocator: std.mem.Allocator,
-    id: []const u8,
+    tool_id: []const u8,
     version: []const u8,
-    os: platform.Os,
-    arch: platform.Arch,
+    operating_system: platform.OperatingSystem,
+    architecture: platform.Arch,
     bin_dir: []const u8,
     tmp_dir: []const u8,
     progress: ?http.ProgressCallback = null,
@@ -271,7 +271,7 @@ pub const InstallStrategy = union(enum) {
             const url = try renderTemplate(ctx.allocator, self.url_template, ctx);
             defer ctx.allocator.free(url);
 
-            const tmp_bin = try std.fs.path.join(ctx.allocator, &.{ ctx.tmp_dir, ctx.id });
+            const tmp_bin = try std.fs.path.join(ctx.allocator, &.{ ctx.tmp_dir, ctx.tool_id });
             defer ctx.allocator.free(tmp_bin);
 
             output.printDownloading(url);
@@ -293,8 +293,8 @@ pub const InstallStrategy = union(enum) {
                     ctx.version,
                     self.product,
                     ctx.version,
-                    ctx.os.name(),
-                    ctx.arch.goName(),
+                    ctx.operating_system.name(),
+                    ctx.architecture.goName(),
                 },
             );
             defer ctx.allocator.free(url);
@@ -336,20 +336,20 @@ pub const InstallStrategy = union(enum) {
         snap: ?[]const u8 = null,
 
         pub fn execute(self: SystemPackage, ctx: *InstallContext) !void {
-            const pm = platform.PackageManager.detect();
-            const pkg_name = self.packageFor(pm) orelse {
-                output.printNoPackageManager(@tagName(pm));
+            const pkg_manager = platform.PackageManager.detect();
+            const pkg_name = self.packageFor(pkg_manager) orelse {
+                output.printNoPackageManager(@tagName(pkg_manager));
                 return error.NoPackageForManager;
             };
 
-            const install_args = pm.installArgs();
+            const install_args = pkg_manager.installArgs();
             var argv: std.ArrayList([]const u8) = .empty;
             defer argv.deinit(ctx.allocator);
 
             try argv.appendSlice(ctx.allocator, install_args);
             try argv.append(ctx.allocator, pkg_name);
 
-            output.printRunningCmd(pm.command() orelse "unknown", pkg_name);
+            output.printRunningCmd(pkg_manager.command() orelse "unknown", pkg_name);
 
             // Use spawn+wait (not run) so stdin/stdout/stderr are inherited —
             // this lets sudo reach the TTY to prompt for a password.
@@ -509,7 +509,7 @@ pub const InstallStrategy = union(enum) {
                 try argv.append(ctx.allocator, script_path);
 
                 if (self.install_script_args) |args_tmpl| {
-                    const opt_dir = try std.fmt.allocPrint(ctx.allocator, "{s}/.local/opt/{s}", .{ home, ctx.id });
+                    const opt_dir = try std.fmt.allocPrint(ctx.allocator, "{s}/.local/opt/{s}", .{ home, ctx.tool_id });
                     defer ctx.allocator.free(opt_dir);
 
                     var it = std.mem.splitScalar(u8, args_tmpl, ' ');
@@ -642,11 +642,11 @@ pub fn renderTemplate(allocator: std.mem.Allocator, tmpl: []const u8, ctx: *cons
             const replacement: []const u8 = if (std.mem.eql(u8, key, "version"))
                 ctx.version
             else if (std.mem.eql(u8, key, "os"))
-                ctx.os.name()
+                ctx.operating_system.name()
             else if (std.mem.eql(u8, key, "arch"))
-                ctx.arch.goName()
+                ctx.architecture.goName()
             else if (std.mem.eql(u8, key, "arch_uname"))
-                ctx.arch.unameName()
+                ctx.architecture.unameName()
             else
                 tmpl[i .. i + end + 1]; // keep unchanged
 
@@ -660,12 +660,12 @@ pub fn renderTemplate(allocator: std.mem.Allocator, tmpl: []const u8, ctx: *cons
     return result.toOwnedSlice(allocator);
 }
 
-/// Copy src_path binary to ctx.bin_dir/ctx.id and make it executable.
+/// Copy src_path binary to ctx.bin_dir/ctx.tool_id and make it executable.
 /// Uses a copy-then-rename pattern so replacing the running binary is safe.
 fn installBinary(ctx: *InstallContext, src_path: []const u8) !void {
     std.fs.cwd().makePath(ctx.bin_dir) catch {};
 
-    const dest = try std.fs.path.join(ctx.allocator, &.{ ctx.bin_dir, ctx.id });
+    const dest = try std.fs.path.join(ctx.allocator, &.{ ctx.bin_dir, ctx.tool_id });
     defer ctx.allocator.free(dest);
 
     const tmp_dest = try std.fmt.allocPrint(ctx.allocator, "{s}.new", .{dest});
@@ -703,9 +703,9 @@ fn verifyChecksum(allocator: std.mem.Allocator, file_path: []const u8, checksum_
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
     var buf: [65536]u8 = undefined;
     while (true) {
-        const n = try file.read(&buf);
-        if (n == 0) break;
-        hasher.update(buf[0..n]);
+        const num_read = try file.read(&buf);
+        if (num_read == 0) break;
+        hasher.update(buf[0..num_read]);
     }
     var digest: [32]u8 = undefined;
     hasher.final(&digest);
@@ -721,22 +721,20 @@ fn verifyChecksum(allocator: std.mem.Allocator, file_path: []const u8, checksum_
 }
 
 test "renderTemplate" {
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
-    defer _ = gpa.deinit();
-    const alloc = gpa.allocator();
+    const allocator = std.testing.allocator;
 
     var ctx = InstallContext{
-        .allocator = alloc,
-        .id = "helm",
+        .allocator = allocator,
+        .tool_id = "helm",
         .version = "3.15.0",
-        .os = .linux,
-        .arch = .x86_64,
+        .operating_system = .linux,
+        .architecture = .x86_64,
         .bin_dir = "/home/user/.local/bin",
         .tmp_dir = "/tmp/dot-helm",
     };
 
-    const result = try renderTemplate(alloc, "helm-v{version}-{os}-{arch}.tar.gz", &ctx);
-    defer alloc.free(result);
+    const result = try renderTemplate(allocator, "helm-v{version}-{os}-{arch}.tar.gz", &ctx);
+    defer allocator.free(result);
 
     try std.testing.expectEqualStrings("helm-v3.15.0-linux-amd64.tar.gz", result);
 }

@@ -40,7 +40,7 @@ pub fn build(b: *std.Build) void {
     lint_cmd.dependOn(step: {
         // Swap in and out whatever rules you see fit from RULES.md
         var builder = zlinter.builder(b, .{});
-        builder.addRule(.{ .builtin = .field_naming }, .{});
+        builder.addRule(.{ .builtin = .field_naming }, .{ .struct_field_exclude_len = &.{ "x", "y", "z", "i", "b", "id" } });
         builder.addRule(.{ .builtin = .declaration_naming }, .{});
         builder.addRule(.{ .builtin = .function_naming }, .{});
         builder.addRule(.{ .builtin = .file_naming }, .{});

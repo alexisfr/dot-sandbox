@@ -82,9 +82,9 @@ fn cmdAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     // Load existing sources and check for duplicates
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    const aa = arena.allocator();
+    const arena_alloc = arena.allocator();
 
-    const existing = loader.loadRepositories(aa, allocator) catch &.{};
+    const existing = loader.loadRepositories(arena_alloc, allocator) catch &.{};
     for (existing) |s| {
         if (std.mem.eql(u8, s.name, name)) {
             output.printFmt("{s}Error:{s} repository '{s}' already added\n", .{ output.red, output.reset, name });
@@ -104,17 +104,20 @@ fn cmdAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     const cache_file = try std.fs.cwd().createFile(cache_path, .{});
     defer cache_file.close();
-    try cache_file.writeAll(body);
+    var cache_write_buf: [4096]u8 = undefined;
+    var cache_writer = cache_file.writerStreaming(&cache_write_buf);
+    try cache_writer.interface.writeAll(body);
+    try cache_writer.interface.flush();
 
     // Append to repositories.json
     const now = std.time.timestamp();
-    const now_str = try std.fmt.allocPrint(aa, "{d}", .{now});
+    const now_str = try std.fmt.allocPrint(arena_alloc, "{d}", .{now});
 
     var new_sources: std.ArrayList(loader.RepositorySource) = .empty;
-    try new_sources.appendSlice(aa, existing);
-    try new_sources.append(aa, .{
-        .name = try aa.dupe(u8, name),
-        .url = try aa.dupe(u8, url),
+    try new_sources.appendSlice(arena_alloc, existing);
+    try new_sources.append(arena_alloc, .{
+        .name = try arena_alloc.dupe(u8, name),
+        .url = try arena_alloc.dupe(u8, url),
         .added_at = now_str,
         .fetched_at = now_str,
     });
@@ -129,9 +132,9 @@ fn cmdAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
 fn cmdList(allocator: std.mem.Allocator) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    const aa = arena.allocator();
+    const arena_alloc = arena.allocator();
 
-    const sources = loader.loadRepositories(aa, allocator) catch &.{};
+    const sources = loader.loadRepositories(arena_alloc, allocator) catch &.{};
 
     if (sources.len == 0) {
         std.debug.print("No repositories configured.\n\n", .{});
@@ -158,7 +161,9 @@ fn cmdList(allocator: std.mem.Allocator) !void {
             defer allocator.free(path);
             const file = std.fs.cwd().openFile(path, .{}) catch break :blk 0;
             defer file.close();
-            const content = file.readToEndAlloc(allocator, 10 * 1024 * 1024) catch break :blk 0;
+            var list_read_buf: [4096]u8 = undefined;
+            var list_reader = file.readerStreaming(&list_read_buf);
+            const content = list_reader.interface.allocRemaining(allocator, .limited(10 * 1024 * 1024)) catch break :blk 0;
             defer allocator.free(content);
             break :blk loader.countToolsInJson(allocator, content);
         };
@@ -169,10 +174,10 @@ fn cmdList(allocator: std.mem.Allocator) !void {
         const fetched_str: []const u8 = if (fetched_at_n == 0) "never" else blk: {
             const secs: u64 = @intCast(fetched_at_n);
             const epoch = std.time.epoch.EpochSeconds{ .secs = secs };
-            const yd = epoch.getEpochDay().calculateYearDay();
-            const md = yd.calculateMonthDay();
+            const year_day = epoch.getEpochDay().calculateYearDay();
+            const month_day = year_day.calculateMonthDay();
             break :blk std.fmt.bufPrint(&date_buf, "{d:0>4}-{d:0>2}-{d:0>2}", .{
-                yd.year, md.month.numeric(), md.day_index + 1,
+                year_day.year, month_day.month.numeric(), month_day.day_index + 1,
             }) catch "?";
         };
 
@@ -196,9 +201,9 @@ fn cmdRemove(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    const aa = arena.allocator();
+    const arena_alloc = arena.allocator();
 
-    const sources = loader.loadRepositories(aa, allocator) catch &.{};
+    const sources = loader.loadRepositories(arena_alloc, allocator) catch &.{};
 
     var found = false;
     var new_sources: std.ArrayList(loader.RepositorySource) = .empty;
@@ -206,7 +211,7 @@ fn cmdRemove(allocator: std.mem.Allocator, args: []const []const u8) !void {
         if (std.mem.eql(u8, s.name, name)) {
             found = true;
         } else {
-            try new_sources.append(aa, s);
+            try new_sources.append(arena_alloc, s);
         }
     }
 
@@ -234,9 +239,9 @@ fn cmdRemove(allocator: std.mem.Allocator, args: []const []const u8) !void {
 fn cmdUpdate(allocator: std.mem.Allocator, args: []const []const u8) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    const aa = arena.allocator();
+    const arena_alloc = arena.allocator();
 
-    const sources = loader.loadRepositories(aa, allocator) catch &.{};
+    const sources = loader.loadRepositories(arena_alloc, allocator) catch &.{};
 
     if (sources.len == 0) {
         std.debug.print("No repositories configured.\n", .{});
@@ -268,7 +273,9 @@ fn cmdUpdate(allocator: std.mem.Allocator, args: []const []const u8) !void {
             defer allocator.free(path);
             const file = std.fs.cwd().openFile(path, .{}) catch break :blk 0;
             defer file.close();
-            const content = file.readToEndAlloc(allocator, 10 * 1024 * 1024) catch break :blk 0;
+            var rm_read_buf: [4096]u8 = undefined;
+            var rm_reader = file.readerStreaming(&rm_read_buf);
+            const content = rm_reader.interface.allocRemaining(allocator, .limited(10 * 1024 * 1024)) catch break :blk 0;
             defer allocator.free(content);
             break :blk loader.countToolsInJson(allocator, content);
         };

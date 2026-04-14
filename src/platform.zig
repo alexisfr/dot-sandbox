@@ -1,22 +1,28 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-pub const Os = enum {
+pub const OperatingSystem = enum {
     linux,
     macos,
 
-    pub fn current() Os {
+    pub fn current() OperatingSystem {
         return switch (builtin.os.tag) {
             .macos => .macos,
             else => .linux,
         };
     }
 
-    /// Name used in download URLs (Go convention)
-    pub fn name(self: Os) []const u8 {
+    pub fn name(self: OperatingSystem) []const u8 {
         return switch (self) {
             .linux => "linux",
             .macos => "darwin",
+        };
+    }
+
+    pub fn goName(self: OperatingSystem) []const u8 {
+        return switch (self) {
+            .linux => "linux-amd64",
+            .macos => "darwin-amd64",
         };
     }
 };
@@ -195,8 +201,8 @@ pub const PackageManager = enum {
     }
 };
 
-test "Os.current does not panic" {
-    _ = Os.current();
+test "OperatingSystem.current does not panic" {
+    _ = OperatingSystem.current();
 }
 
 test "Arch.current does not panic" {

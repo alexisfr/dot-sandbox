@@ -1,7 +1,6 @@
 const std = @import("std");
 const platform = @import("platform.zig");
 
-const local_bin = "~/.local/bin";
 const source_marker = "# SOURCE SHELL INTEGRATION";
 const path_marker = "# ADD LOCAL BIN TO PATH";
 
@@ -25,7 +24,7 @@ pub fn ensureSourced(shell: platform.Shell, allocator: std.mem.Allocator) !void 
     defer allocator.free(integration_path);
 
     // Ensure integration file exists (open without truncating; create only if absent)
-    const integ_dir = std.fs.path.dirname(integration_path) orelse unreachable;
+    const integ_dir = std.fs.path.dirname(integration_path).?;
     try std.fs.cwd().makePath(integ_dir);
     const integ_file = std.fs.cwd().openFile(integration_path, .{}) catch |e| switch (e) {
         error.FileNotFound => try std.fs.cwd().createFile(integration_path, .{}),
@@ -42,7 +41,9 @@ pub fn ensureSourced(shell: platform.Shell, allocator: std.mem.Allocator) !void 
         },
         else => return e,
     };
-    const content = try rc_content.readToEndAlloc(allocator, 1024 * 1024);
+    var rc_read_buf: [4096]u8 = undefined;
+    var rc_reader = rc_content.readerStreaming(&rc_read_buf);
+    const content = try rc_reader.interface.allocRemaining(allocator, .limited(1024 * 1024));
     rc_content.close();
     defer allocator.free(content);
 
@@ -98,7 +99,9 @@ pub fn addSection(
         },
         else => return e,
     };
-    const existing = try file.readToEndAlloc(allocator, 4 * 1024 * 1024);
+    var add_read_buf: [4096]u8 = undefined;
+    var add_reader = file.readerStreaming(&add_read_buf);
+    const existing = try add_reader.interface.allocRemaining(allocator, .limited(4 * 1024 * 1024));
     file.close();
     defer allocator.free(existing);
 
@@ -130,7 +133,9 @@ pub fn removeSection(
     defer allocator.free(end_marker);
 
     const file = std.fs.cwd().openFile(integration_path, .{}) catch return;
-    const existing = try file.readToEndAlloc(allocator, 4 * 1024 * 1024);
+    var rm_read_buf: [4096]u8 = undefined;
+    var rm_reader = file.readerStreaming(&rm_read_buf);
+    const existing = try rm_reader.interface.allocRemaining(allocator, .limited(4 * 1024 * 1024));
     file.close();
     defer allocator.free(existing);
 
@@ -269,7 +274,9 @@ fn ensurePathInIntegration(
     home: []const u8,
 ) !void {
     const file = std.fs.cwd().openFile(integration_path, .{}) catch return;
-    const content = file.readToEndAlloc(allocator, 1024 * 1024) catch {
+    var path_read_buf: [4096]u8 = undefined;
+    var path_reader = file.readerStreaming(&path_read_buf);
+    const content = path_reader.interface.allocRemaining(allocator, .limited(1024 * 1024)) catch {
         file.close();
         return;
     };
@@ -292,7 +299,9 @@ fn ensurePathInIntegration(
 
 fn normalizeIntegrationFile(path: []const u8, allocator: std.mem.Allocator) !void {
     const file = std.fs.cwd().openFile(path, .{}) catch return; // not yet created — nothing to normalize
-    const existing = try file.readToEndAlloc(allocator, 4 * 1024 * 1024);
+    var norm_read_buf: [4096]u8 = undefined;
+    var norm_reader = file.readerStreaming(&norm_read_buf);
+    const existing = try norm_reader.interface.allocRemaining(allocator, .limited(4 * 1024 * 1024));
     file.close();
     defer allocator.free(existing);
     const cleaned = try normalizeBlankLines(allocator, existing);
@@ -304,13 +313,19 @@ fn appendToFile(path: []const u8, content: []const u8) !void {
     const file = try std.fs.cwd().createFile(path, .{ .truncate = false });
     defer file.close();
     try file.seekFromEnd(0);
-    try file.writeAll(content);
+    var append_write_buf: [4096]u8 = undefined;
+    var append_writer = file.writerStreaming(&append_write_buf);
+    try append_writer.interface.writeAll(content);
+    try append_writer.interface.flush();
 }
 
 fn writeFile(path: []const u8, content: []const u8) !void {
     const file = try std.fs.cwd().createFile(path, .{});
     defer file.close();
-    try file.writeAll(content);
+    var write_buf: [4096]u8 = undefined;
+    var file_writer = file.writerStreaming(&write_buf);
+    try file_writer.interface.writeAll(content);
+    try file_writer.interface.flush();
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

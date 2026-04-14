@@ -60,7 +60,9 @@ pub const State = struct {
         const file = try std.fs.cwd().openFile(self.path, .{});
         defer file.close();
 
-        const content = try file.readToEndAlloc(self.arena.allocator(), 4 * 1024 * 1024);
+        var state_read_buf: [4096]u8 = undefined;
+        var state_reader = file.readerStreaming(&state_read_buf);
+        const content = try state_reader.interface.allocRemaining(self.arena.allocator(), .limited(4 * 1024 * 1024));
 
         const parsed = try std.json.parseFromSlice(
             std.json.Value,
@@ -109,7 +111,7 @@ pub const State = struct {
             if (!first_tool) try buf.appendSlice(self.allocator, ",\n");
             first_tool = false;
 
-            const t = kv.value_ptr.*;
+            const tool_entry = kv.value_ptr.*;
             const line = try std.fmt.allocPrint(self.allocator,
                 \\    "{s}": {{
                 \\      "version": "{s}",
@@ -121,12 +123,12 @@ pub const State = struct {
                 \\    }}
             , .{
                 kv.key_ptr.*,
-                t.version,
-                t.installed_at,
-                t.method,
-                t.source,
-                t.status,
-                if (t.pinned) "true" else "false",
+                tool_entry.version,
+                tool_entry.installed_at,
+                tool_entry.method,
+                tool_entry.source,
+                tool_entry.status,
+                if (tool_entry.pinned) "true" else "false",
             });
             defer self.allocator.free(line);
             try buf.appendSlice(self.allocator, line);
@@ -136,7 +138,10 @@ pub const State = struct {
 
         const file = try std.fs.cwd().createFile(self.path, .{});
         defer file.close();
-        try file.writeAll(buf.items);
+        var state_write_buf: [4096]u8 = undefined;
+        var state_writer = file.writerStreaming(&state_write_buf);
+        try state_writer.interface.writeAll(buf.items);
+        try state_writer.interface.flush();
     }
 
     pub fn isInstalled(self: *State, id: []const u8) bool {
@@ -144,21 +149,21 @@ pub const State = struct {
     }
 
     pub fn getVersion(self: *State, id: []const u8) ?[]const u8 {
-        const e = self.tools.get(id) orelse return null;
-        return if (e.version.len > 0) e.version else null;
+        const entry = self.tools.get(id) orelse return null;
+        return if (entry.version.len > 0) entry.version else null;
     }
 
     pub fn isPinned(self: *State, id: []const u8) bool {
-        const e = self.tools.get(id) orelse return false;
-        return e.pinned;
+        const entry = self.tools.get(id) orelse return false;
+        return entry.pinned;
     }
 
     pub fn addTool(self: *State, id: []const u8, version: []const u8, method: []const u8, pinned: bool) !void {
         const arena_alloc = self.arena.allocator();
 
         // ISO 8601 timestamp
-        const ts = std.time.timestamp();
-        const installed_at = try std.fmt.allocPrint(arena_alloc, "{d}", .{ts});
+        const timestamp = std.time.timestamp();
+        const installed_at = try std.fmt.allocPrint(arena_alloc, "{d}", .{timestamp});
 
         const source = try std.fmt.allocPrint(
             arena_alloc,

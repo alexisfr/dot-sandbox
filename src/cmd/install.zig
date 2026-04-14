@@ -23,19 +23,19 @@ pub const InstallArgs = struct {
 
 pub fn parseInstallArgs(args: []const []const u8) InstallArgs {
     var result = InstallArgs{};
-    var i: usize = 0;
-    while (i < args.len) : (i += 1) {
-        const a = args[i];
-        if (std.mem.eql(u8, a, "--force")) {
+    var idx: usize = 0;
+    while (idx < args.len) : (idx += 1) {
+        const arg = args[idx];
+        if (std.mem.eql(u8, arg, "--force")) {
             result.force = true;
-        } else if (std.mem.eql(u8, a, "--group") or std.mem.eql(u8, a, "-g")) {
+        } else if (std.mem.eql(u8, arg, "--group") or std.mem.eql(u8, arg, "-g")) {
             result.group_mode = true;
-            i += 1;
-            if (i < args.len) result.group_name = args[i];
+            idx += 1;
+            if (idx < args.len) result.group_name = args[idx];
         } else if (result.tool_name.len == 0 and !result.group_mode) {
-            result.tool_name = a;
+            result.tool_name = arg;
         } else if (result.version_arg == null and result.tool_name.len > 0) {
-            result.version_arg = a;
+            result.version_arg = arg;
         }
     }
     return result;
@@ -190,13 +190,13 @@ fn installTool(
     tools: []const tool_mod.Tool,
 ) !void {
     var found: ?tool_mod.Tool = null;
-    for (tools) |t| {
-        if (std.mem.eql(u8, t.id, id)) {
-            found = t;
+    for (tools) |entry| {
+        if (std.mem.eql(u8, entry.id, id)) {
+            found = entry;
             break;
         }
     }
-    const t = found orelse {
+    const tool = found orelse {
         output.printUnknownTool(id);
         if (closestTool(id, tools)) |suggestion| {
             std.debug.print("Did you mean '{s}'?\n", .{suggestion});
@@ -212,8 +212,8 @@ fn installTool(
         version = try allocator.dupe(u8, v);
         version_owned = true;
     } else {
-        printFetchingVersion(t.name);
-        version = t.version_source.resolve(allocator) catch |e| blk: {
+        printFetchingVersion(tool.name);
+        version = tool.version_source.resolve(allocator) catch |e| blk: {
             printVersionFetchWarning(@errorName(e));
             break :blk try allocator.dupe(u8, "latest");
         };
@@ -223,41 +223,41 @@ fn installTool(
 
     // Skip pinned tools unless forced
     if (!force and version_arg == null) {
-        if (state.isPinned(t.id)) {
-            const pinned_ver = state.getVersion(t.id) orelse "pinned";
-            printPinnedSkip(t.name, t.id, pinned_ver);
+        if (state.isPinned(tool.id)) {
+            const pinned_ver = state.getVersion(tool.id) orelse "pinned";
+            printPinnedSkip(tool.name, tool.id, pinned_ver);
             return;
         }
     }
 
     // Check system install (not our ~/.local/bin) — only when dot doesn't already manage this tool.
     // If dot already owns it (it's in state), the user already resolved the conflict; don't warn again.
-    if (!force and !state.isInstalled(t.id)) {
-        if (checkSystemInstall(allocator, t.id)) |sys_path| {
+    if (!force and !state.isInstalled(tool.id)) {
+        if (checkSystemInstall(allocator, tool.id)) |sys_path| {
             defer allocator.free(sys_path);
-            printSkipSystem(t.name, sys_path, "unknown", version);
+            printSkipSystem(tool.name, sys_path, "unknown", version);
             return;
         }
     }
 
     // Check if already up to date
     if (!force) {
-        if (state.getVersion(t.id)) |installed_ver| {
+        if (state.getVersion(tool.id)) |installed_ver| {
             if (std.mem.eql(u8, installed_ver, version)) {
-                printAlreadyReady(t.name, installed_ver);
+                printAlreadyReady(tool.name, installed_ver);
                 return;
             }
         }
     }
 
-    const os = platform.Os.current();
+    const operating_system = platform.OperatingSystem.current();
     const arch = platform.Arch.current();
 
-    printInstallHeader(t.name, version, version_arg != null);
+    printInstallHeader(tool.name, version, version_arg != null);
 
     // Brew install path: preferred when brew is available and tool declares a formula
     var used_brew = false;
-    if (t.brew_formula) |formula| {
+    if (tool.brew_formula) |formula| {
         if (platform.PackageManager.brew.isAvailable()) {
             output.printStep("Brew", output.sym_arrow, formula);
             brewInstall(allocator, formula, force) catch |e| {
@@ -276,7 +276,7 @@ fn installTool(
         const bin_dir = try std.fs.path.join(allocator, &.{ home, ".local", "bin" });
         defer allocator.free(bin_dir);
 
-        const tmp_dir = try std.fmt.allocPrint(allocator, "/tmp/dot-{s}-{s}", .{ t.id, version });
+        const tmp_dir = try std.fmt.allocPrint(allocator, "/tmp/dot-{s}-{s}", .{ tool.id, version });
         defer allocator.free(tmp_dir);
 
         std.fs.cwd().makePath(tmp_dir) catch {};
@@ -285,16 +285,16 @@ fn installTool(
         var bar = progress_mod.ProgressBar{ .step = "Downloading" };
         var ctx = tool_mod.InstallContext{
             .allocator = allocator,
-            .id = t.id,
+            .tool_id = tool.id,
             .version = version,
-            .os = os,
-            .arch = arch,
+            .operating_system = operating_system,
+            .architecture = arch,
             .bin_dir = bin_dir,
             .tmp_dir = tmp_dir,
             .progress = http.ProgressCallback{ .context = &bar, .func = progressCbFn },
         };
 
-        t.strategy.execute(&ctx) catch |e| {
+        tool.strategy.execute(&ctx) catch |e| {
             bar.finish();
             output.printStep("Installation", output.sym_fail, @errorName(e));
             output.printError("Installation failed");
@@ -302,16 +302,15 @@ fn installTool(
         };
         bar.finish();
         output.printStep("Installation", output.sym_ok, bin_dir);
-
     }
 
     // Shell integration (always, regardless of install method)
-    _ = writeShellIntegration(&t, allocator);
+    _ = writeShellIntegration(&tool, allocator);
 
     // Post-install commands — only on fresh installs, not upgrades (non-fatal)
-    if (!state.isInstalled(t.id) and t.post_install.len > 0) {
+    if (!state.isInstalled(tool.id) and tool.post_install.len > 0) {
         output.printStep("Post-install", output.sym_arrow, "");
-        for (t.post_install) |cmd| {
+        for (tool.post_install) |cmd| {
             const wrapped = try std.fmt.allocPrint(allocator, "export PATH=\"$HOME/.local/bin:$PATH\"; {s}", .{cmd});
             defer allocator.free(wrapped);
             const result = std.process.Child.run(.{
@@ -332,9 +331,9 @@ fn installTool(
     }
 
     // Post-upgrade commands — only when upgrading an already-installed tool (non-fatal)
-    if (state.isInstalled(t.id) and t.post_upgrade.len > 0) {
+    if (state.isInstalled(tool.id) and tool.post_upgrade.len > 0) {
         output.printStep("Post-upgrade", output.sym_arrow, "");
-        for (t.post_upgrade) |cmd| {
+        for (tool.post_upgrade) |cmd| {
             const wrapped = try std.fmt.allocPrint(allocator, "export PATH=\"$HOME/.local/bin:$PATH\"; {s}", .{cmd});
             defer allocator.free(wrapped);
             const result = std.process.Child.run(.{
@@ -355,16 +354,16 @@ fn installTool(
     }
 
     // Update state — pin if the user specified an explicit version
-    const method = if (used_brew) "brew" else @tagName(t.strategy);
-    try state.addTool(t.id, version, method, version_arg != null);
+    const method = if (used_brew) "brew" else @tagName(tool.strategy);
+    try state.addTool(tool.id, version, method, version_arg != null);
 
     // Success
-    printSuccess(t.name, null);
-    if (t.quick_start.len > 0) printQuickStart(t.quick_start);
-    if (t.resources.len > 0) {
+    printSuccess(tool.name, null);
+    if (tool.quick_start.len > 0) printQuickStart(tool.quick_start);
+    if (tool.resources.len > 0) {
         var res_items: std.ArrayList([]const u8) = .empty;
         defer res_items.deinit(allocator);
-        for (t.resources) |r| {
+        for (tool.resources) |r| {
             try res_items.append(allocator, try std.fmt.allocPrint(allocator, "{s}: {s}", .{ r.label, r.url }));
         }
         printResources(res_items.items);
@@ -385,15 +384,15 @@ fn guardedCompletion(sh: platform.Shell, id: []const u8, cmd: []const u8, alloca
 }
 
 fn writeShellIntegration(t: *const tool_mod.Tool, allocator: std.mem.Allocator) bool {
-    const sh = platform.Shell.detect();
-    if (sh == .unknown) return false;
+    const shell_type = platform.Shell.detect();
+    if (shell_type == .unknown) return false;
 
     var section: std.ArrayList(u8) = .empty;
     defer section.deinit(allocator);
 
     if (t.shell_completions) |completions| {
-        if (completions.forShell(sh)) |comp_cmd| {
-            const guarded = guardedCompletion(sh, t.id, comp_cmd, allocator) catch return false;
+        if (completions.forShell(shell_type)) |comp_cmd| {
+            const guarded = guardedCompletion(shell_type, t.id, comp_cmd, allocator) catch return false;
             defer allocator.free(guarded);
             section.appendSlice(allocator, guarded) catch return false;
         }
@@ -410,7 +409,7 @@ fn writeShellIntegration(t: *const tool_mod.Tool, allocator: std.mem.Allocator) 
         // Zsh:  `compdef <alias>=<id>` delegates the completion function.
         // Bash: the generated completion function name (e.g. __start_kubectl) isn't predictable
         //       enough for a generic solution, so bash users get the alias but not the completions.
-        const comp_delegation: ?[]const u8 = switch (sh) {
+        const comp_delegation: ?[]const u8 = switch (shell_type) {
             .fish => std.fmt.allocPrint(allocator, "\ncomplete -c {s} -w {s}", .{ alias_name, t.id }) catch null,
             .zsh => if (t.shell_completions != null and t.shell_completions.?.zsh_cmd != null)
                 std.fmt.allocPrint(allocator, "\ncompdef {s}={s}", .{ alias_name, t.id }) catch null
@@ -426,9 +425,9 @@ fn writeShellIntegration(t: *const tool_mod.Tool, allocator: std.mem.Allocator) 
 
     if (section.items.len == 0) return false;
 
-    shell_mod.ensureSourced(sh, allocator) catch {};
-    shell_mod.addSection(sh, t.id, section.items, allocator) catch {};
-    output.printStep("Shell", output.sym_ok, sh.name());
+    shell_mod.ensureSourced(shell_type, allocator) catch {};
+    shell_mod.addSection(shell_type, t.id, section.items, allocator) catch {};
+    output.printStep("Shell", output.sym_ok, shell_type.name());
     return true;
 }
 
@@ -567,12 +566,12 @@ pub fn printGroupToolSeparator(name: []const u8, index: usize, total: usize) voi
     const width = 48;
     const counter_len = blk: {
         // count digits in index and total, plus " [x/y] " = 7 + digits
-        var n: usize = 3; // " [" + "]"
+        var len: usize = 3; // " [" + "]"
         var x = index;
-        while (x > 0) : (x /= 10) n += 1;
+        while (x > 0) : (x /= 10) len += 1;
         var y = total;
-        while (y > 0) : (y /= 10) n += 1;
-        break :blk n + 1; // +1 for "/"
+        while (y > 0) : (y /= 10) len += 1;
+        break :blk len + 1; // +1 for "/"
     };
     const name_len = name.len;
     const dashes_right = if (width > name_len + counter_len + 2)
@@ -588,7 +587,6 @@ pub fn printGroupToolSeparator(name: []const u8, index: usize, total: usize) voi
     for (0..dashes_right) |_| std.debug.print("{s}", .{output.sym_dash});
     std.debug.print("{s}\n", .{output.reset});
 }
-
 
 // ─── Fuzzy match ──────────────────────────────────────────────────────────────
 
@@ -617,9 +615,9 @@ fn closestTool(id: []const u8, tools: []const tool_mod.Tool) ?[]const u8 {
     var best: ?[]const u8 = null;
     var best_dist: usize = 3; // threshold: suggest only if dist < 3
     for (tools) |t| {
-        const d = editDistance(id, t.id);
-        if (d < best_dist) {
-            best_dist = d;
+        const distance = editDistance(id, t.id);
+        if (distance < best_dist) {
+            best_dist = distance;
             best = t.id;
         }
     }
@@ -629,58 +627,58 @@ fn closestTool(id: []const u8, tools: []const tool_mod.Tool) ?[]const u8 {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 test "parseInstallArgs: tool name only" {
-    const a = parseInstallArgs(&.{"helm"});
-    try std.testing.expectEqualStrings("helm", a.tool_name);
-    try std.testing.expect(a.version_arg == null);
-    try std.testing.expect(!a.force);
-    try std.testing.expect(!a.group_mode);
+    const args = parseInstallArgs(&.{"helm"});
+    try std.testing.expectEqualStrings("helm", args.tool_name);
+    try std.testing.expect(args.version_arg == null);
+    try std.testing.expect(!args.force);
+    try std.testing.expect(!args.group_mode);
 }
 
 test "parseInstallArgs: tool name with version" {
-    const a = parseInstallArgs(&.{ "helm", "3.15.0" });
-    try std.testing.expectEqualStrings("helm", a.tool_name);
-    try std.testing.expectEqualStrings("3.15.0", a.version_arg.?);
+    const args = parseInstallArgs(&.{ "helm", "3.15.0" });
+    try std.testing.expectEqualStrings("helm", args.tool_name);
+    try std.testing.expectEqualStrings("3.15.0", args.version_arg.?);
 }
 
 test "parseInstallArgs: --force flag" {
-    const a = parseInstallArgs(&.{ "--force", "helm" });
-    try std.testing.expect(a.force);
-    try std.testing.expectEqualStrings("helm", a.tool_name);
+    const args = parseInstallArgs(&.{ "--force", "helm" });
+    try std.testing.expect(args.force);
+    try std.testing.expectEqualStrings("helm", args.tool_name);
 }
 
 test "parseInstallArgs: --force after tool" {
-    const a = parseInstallArgs(&.{ "helm", "--force" });
+    const args = parseInstallArgs(&.{ "helm", "--force" });
     // --force before tool_name is set is fine; after tool_name is set, --force
     // isn't parsed as a special flag in current logic — it would be version_arg.
     // This test documents current behavior.
-    try std.testing.expectEqualStrings("helm", a.tool_name);
+    try std.testing.expectEqualStrings("helm", args.tool_name);
 }
 
 test "parseInstallArgs: --group flag" {
-    const a = parseInstallArgs(&.{ "--group", "k8s" });
-    try std.testing.expect(a.group_mode);
-    try std.testing.expectEqualStrings("k8s", a.group_name);
-    try std.testing.expect(!a.force);
+    const args = parseInstallArgs(&.{ "--group", "k8s" });
+    try std.testing.expect(args.group_mode);
+    try std.testing.expectEqualStrings("k8s", args.group_name);
+    try std.testing.expect(!args.force);
 }
 
 test "parseInstallArgs: -g shorthand" {
-    const a = parseInstallArgs(&.{ "-g", "iac" });
-    try std.testing.expect(a.group_mode);
-    try std.testing.expectEqualStrings("iac", a.group_name);
+    const args = parseInstallArgs(&.{ "-g", "iac" });
+    try std.testing.expect(args.group_mode);
+    try std.testing.expectEqualStrings("iac", args.group_name);
 }
 
 test "parseInstallArgs: --force with group" {
-    const a = parseInstallArgs(&.{ "--force", "--group", "cloud" });
-    try std.testing.expect(a.force);
-    try std.testing.expect(a.group_mode);
-    try std.testing.expectEqualStrings("cloud", a.group_name);
+    const args = parseInstallArgs(&.{ "--force", "--group", "cloud" });
+    try std.testing.expect(args.force);
+    try std.testing.expect(args.group_mode);
+    try std.testing.expectEqualStrings("cloud", args.group_name);
 }
 
 test "parseInstallArgs: empty args" {
-    const a = parseInstallArgs(&.{});
-    try std.testing.expectEqualStrings("", a.tool_name);
-    try std.testing.expect(!a.group_mode);
-    try std.testing.expect(!a.force);
+    const args = parseInstallArgs(&.{});
+    try std.testing.expectEqualStrings("", args.tool_name);
+    try std.testing.expect(!args.group_mode);
+    try std.testing.expect(!args.force);
 }
 
 test "parseGroup: known groups" {

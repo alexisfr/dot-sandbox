@@ -20,18 +20,18 @@ pub fn get(allocator: std.mem.Allocator, url: []const u8) ![]u8 {
     var client: std.http.Client = .{ .allocator = allocator };
     defer client.deinit();
 
-    var aw: std.Io.Writer.Allocating = .init(allocator);
-    defer aw.deinit();
+    var alloc_writer: std.io.Writer.Allocating = .init(allocator);
+    defer alloc_writer.deinit();
 
     const result = try client.fetch(.{
         .location = .{ .url = url },
-        .response_writer = &aw.writer,
+        .response_writer = &alloc_writer.writer,
     });
 
     const code = @intFromEnum(result.status);
     if (code < 200 or code >= 300) return error.HttpError;
 
-    return aw.toOwnedSlice();
+    return alloc_writer.toOwnedSlice();
 }
 
 /// Download a URL to a file path with optional progress reporting.
@@ -78,19 +78,19 @@ pub fn download(
     defer dest_file.close();
 
     var file_buf: [65536]u8 = undefined;
-    var fw = dest_file.writer(&file_buf);
+    var file_writer = dest_file.writer(&file_buf);
 
     var transfer_buf: [65536]u8 = undefined;
     const reader = response.reader(&transfer_buf);
 
     var bytes_done: u64 = 0;
     while (true) {
-        const n = reader.stream(&fw.interface, std.io.Limit.limited(65536)) catch |err| switch (err) {
+        const bytes_read = reader.stream(&file_writer.interface, std.io.Limit.limited(65536)) catch |err| switch (err) {
             error.EndOfStream => break,
             else => |e| return e,
         };
-        bytes_done += n;
-        if (n > 0) {
+        bytes_done += bytes_read;
+        if (bytes_read > 0) {
             if (progress) |cb| cb.call(bytes_done, content_length);
         }
     }
@@ -99,6 +99,6 @@ pub fn download(
     // when Content-Length was absent (indeterminate mode).
     if (progress) |cb| cb.call(bytes_done, content_length orelse bytes_done);
 
-    try fw.interface.flush();
+    try file_writer.interface.flush();
     try std.fs.cwd().rename(tmp_path, dest_path);
 }

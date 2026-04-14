@@ -75,7 +75,10 @@ pub fn run(
             for (tools) |t| {
                 if (!state.isInstalled(t.id)) continue;
                 for (t.groups) |g| {
-                    if (g == group) { try candidates.append(allocator, t); break; }
+                    if (g == group) {
+                        try candidates.append(allocator, t);
+                        break;
+                    }
                 }
             }
             if (candidates.items.len > 0) {
@@ -94,7 +97,10 @@ pub fn run(
         // Single tool upgrade: dot upgrade helm
         var found = false;
         for (tools) |t| {
-            if (std.mem.eql(u8, t.id, name)) { found = true; break; }
+            if (std.mem.eql(u8, t.id, name)) {
+                found = true;
+                break;
+            }
         }
         if (!found) {
             output.printUnknownTool(name);
@@ -133,54 +139,54 @@ pub fn run(
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 test "parseUpgradeArgs: no args → upgrade all, no force" {
-    const a = parseUpgradeArgs(&.{});
-    try std.testing.expect(a.target == null);
-    try std.testing.expect(!a.force);
+    const args = parseUpgradeArgs(&.{});
+    try std.testing.expect(args.target == null);
+    try std.testing.expect(!args.force);
 }
 
 test "parseUpgradeArgs: tool name" {
-    const a = parseUpgradeArgs(&.{"helm"});
-    try std.testing.expectEqualStrings("helm", a.target.?);
-    try std.testing.expect(!a.force);
+    const args = parseUpgradeArgs(&.{"helm"});
+    try std.testing.expectEqualStrings("helm", args.target.?);
+    try std.testing.expect(!args.force);
 }
 
 test "parseUpgradeArgs: group name" {
-    const a = parseUpgradeArgs(&.{"k8s"});
-    try std.testing.expectEqualStrings("k8s", a.target.?);
-    try std.testing.expect(!a.force);
+    const args = parseUpgradeArgs(&.{"k8s"});
+    try std.testing.expectEqualStrings("k8s", args.target.?);
+    try std.testing.expect(!args.force);
     // group detection happens in run(), not here — parseGroup("k8s") should return non-null
-    try std.testing.expect(install_cmd.parseGroup(a.target.?) != null);
+    try std.testing.expect(install_cmd.parseGroup(args.target.?) != null);
 }
 
 test "parseUpgradeArgs: --force flag alone" {
-    const a = parseUpgradeArgs(&.{"--force"});
-    try std.testing.expect(a.target == null);
-    try std.testing.expect(a.force);
+    const args = parseUpgradeArgs(&.{"--force"});
+    try std.testing.expect(args.target == null);
+    try std.testing.expect(args.force);
 }
 
 test "parseUpgradeArgs: tool with --force" {
-    const a = parseUpgradeArgs(&.{ "helm", "--force" });
-    try std.testing.expectEqualStrings("helm", a.target.?);
-    try std.testing.expect(a.force);
+    const args = parseUpgradeArgs(&.{ "helm", "--force" });
+    try std.testing.expectEqualStrings("helm", args.target.?);
+    try std.testing.expect(args.force);
 }
 
 test "parseUpgradeArgs: --force before tool" {
-    const a = parseUpgradeArgs(&.{ "--force", "helm" });
-    try std.testing.expectEqualStrings("helm", a.target.?);
-    try std.testing.expect(a.force);
+    const args = parseUpgradeArgs(&.{ "--force", "helm" });
+    try std.testing.expectEqualStrings("helm", args.target.?);
+    try std.testing.expect(args.force);
 }
 
 test "parseUpgradeArgs: group with --force" {
-    const a = parseUpgradeArgs(&.{ "iac", "--force" });
-    try std.testing.expectEqualStrings("iac", a.target.?);
-    try std.testing.expect(a.force);
-    try std.testing.expect(install_cmd.parseGroup(a.target.?) != null);
+    const args = parseUpgradeArgs(&.{ "iac", "--force" });
+    try std.testing.expectEqualStrings("iac", args.target.?);
+    try std.testing.expect(args.force);
+    try std.testing.expect(install_cmd.parseGroup(args.target.?) != null);
 }
 
 test "parseUpgradeArgs: unknown target is not a group" {
-    const a = parseUpgradeArgs(&.{"not-a-group"});
-    try std.testing.expectEqualStrings("not-a-group", a.target.?);
-    try std.testing.expect(install_cmd.parseGroup(a.target.?) == null);
+    const args = parseUpgradeArgs(&.{"not-a-group"});
+    try std.testing.expectEqualStrings("not-a-group", args.target.?);
+    try std.testing.expect(install_cmd.parseGroup(args.target.?) == null);
 }
 
 test "group upgrade only touches installed tools" {

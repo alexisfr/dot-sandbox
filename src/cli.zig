@@ -133,11 +133,11 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
     const known = [_][]const u8{ "list", "install", "uninstall", "status", "upgrade", "update", "doctor", "repository" };
     var best_dist: usize = std.math.maxInt(usize);
     var best_cmd: []const u8 = "";
-    for (known) |k| {
-        const d = editDistance(command, k);
-        if (d < best_dist) {
-            best_dist = d;
-            best_cmd = k;
+    for (known) |known_cmd| {
+        const dist = editDistance(command, known_cmd);
+        if (dist < best_dist) {
+            best_dist = dist;
+            best_cmd = known_cmd;
         }
     }
     if (best_dist <= 3) {
@@ -235,7 +235,7 @@ test "editDistance: completely different" {
 }
 
 test "mergeTools: external overrides builtin with same ID" {
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    var gpa: std.heap.DebugAllocator(.{}) = .{};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
 

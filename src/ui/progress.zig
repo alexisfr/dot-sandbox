@@ -58,8 +58,7 @@ pub const ProgressBar = struct {
         // (\x1b[2K) so that when done_str shrinks (e.g. KB→MB transition) no stale
         // characters remain visible.
         var buf: [512]u8 = undefined;
-        var fbs = std.io.fixedBufferStream(&buf);
-        const w = fbs.writer();
+        var writer: std.Io.Writer = .fixed(&buf);
 
         const line_start: []const u8 = if (mode == .rich) "\r\x1b[2K" else "\r";
 
@@ -77,26 +76,26 @@ pub const ProgressBar = struct {
             const status_sym = if (is_done) output.sym_ok else output.sym_arrow;
             const status_color = if (is_done) output.green else output.yellow;
 
-            w.print("{s}{s} {s}{s:<14}{s} [{s}{s}{s}] [", .{
-                line_start, prefix, output.cyan, self.step, output.reset,
+            writer.print("{s}{s} {s}{s:<14}{s} [{s}{s}{s}] [", .{
+                line_start,   prefix,     output.cyan,  self.step, output.reset,
                 status_color, status_sym, output.reset,
             }) catch return;
-            for (0..filled) |_| w.writeAll(fill) catch return;
-            for (0..n_empty) |_| w.writeAll(empty_ch) catch return;
-            w.print("] {d:3}%  {s} / {s}{s}", .{ pct, done_str, total_str, detail }) catch return;
+            for (0..filled) |_| writer.writeAll(fill) catch return;
+            for (0..n_empty) |_| writer.writeAll(empty_ch) catch return;
+            writer.print("] {d:3}%  {s} / {s}{s}", .{ pct, done_str, total_str, detail }) catch return;
         } else {
             var done_buf: [32]u8 = undefined;
             const done_str = fmtBytes(current, &done_buf);
 
-            w.print("{s}{s} {s}{s:<14}{s} [{s}{s}{s}] [", .{
-                line_start, prefix, output.cyan, self.step, output.reset,
+            writer.print("{s}{s} {s}{s:<14}{s} [{s}{s}{s}] [", .{
+                line_start,    prefix,           output.cyan,  self.step, output.reset,
                 output.yellow, output.sym_arrow, output.reset,
             }) catch return;
-            for (0..self.width) |_| w.writeAll(fill) catch return;
-            w.print("]  --   {s}{s}", .{ done_str, detail }) catch return;
+            for (0..self.width) |_| writer.writeAll(fill) catch return;
+            writer.print("]  --   {s}{s}", .{ done_str, detail }) catch return;
         }
 
-        std.debug.print("{s}", .{fbs.getWritten()});
+        std.debug.print("{s}", .{writer.buffered()});
     }
 
     /// Lock the bar in place and move to the next line so subsequent output
@@ -129,13 +128,13 @@ pub const ProgressBar = struct {
 
 pub fn fmtBytes(bytes: u64, buf: []u8) []const u8 {
     if (bytes >= 1024 * 1024) {
-        const mb = bytes / (1024 * 1024);
+        const megabytes = bytes / (1024 * 1024);
         const frac = (bytes % (1024 * 1024)) * 10 / (1024 * 1024);
-        return std.fmt.bufPrint(buf, "{d}.{d} MB", .{ mb, frac }) catch "???";
+        return std.fmt.bufPrint(buf, "{d}.{d} MB", .{ megabytes, frac }) catch "???";
     } else if (bytes >= 1024) {
-        const kb = bytes / 1024;
+        const kilobytes = bytes / 1024;
         const frac = (bytes % 1024) * 10 / 1024;
-        return std.fmt.bufPrint(buf, "{d}.{d} KB", .{ kb, frac }) catch "???";
+        return std.fmt.bufPrint(buf, "{d}.{d} KB", .{ kilobytes, frac }) catch "???";
     } else {
         return std.fmt.bufPrint(buf, "{d} B", .{bytes}) catch "???";
     }

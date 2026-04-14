@@ -57,27 +57,27 @@ pub fn run(
         }
     }
 
-    const id = args[0];
+    const tool_id = args[0];
 
-    if (!validate.isValidToolId(id)) {
+    if (!validate.isValidToolId(tool_id)) {
         output.printError("invalid tool name");
         return;
     }
 
-    if (!findInTools(id, tools)) {
-        output.printUnknownTool(id);
+    if (!findInTools(tool_id, tools)) {
+        output.printUnknownTool(tool_id);
         return;
     }
 
-    if (!state.isInstalled(id)) {
-        output.printFmt("{s} is not installed\n", .{id});
+    if (!state.isInstalled(tool_id)) {
+        output.printFmt("{s} is not installed\n", .{tool_id});
         return;
     }
 
     const home = std.posix.getenv("HOME") orelse return error.NoHome;
 
     // Remove binary from ~/.local/bin/
-    const bin_path = try std.fs.path.join(allocator, &.{ home, ".local", "bin", id });
+    const bin_path = try std.fs.path.join(allocator, &.{ home, ".local", "bin", tool_id });
     defer allocator.free(bin_path);
     std.fs.cwd().deleteFile(bin_path) catch |e| switch (e) {
         error.FileNotFound => {}, // already gone, that's fine
@@ -95,7 +95,7 @@ pub fn run(
         }) catch continue;
         defer allocator.free(integ_path);
         if (std.fs.cwd().access(integ_path, .{})) |_| {
-            shell_mod.removeSection(sh, id, allocator) catch {};
+            shell_mod.removeSection(sh, tool_id, allocator) catch {};
             any_removed = true;
         } else |_| {}
     }
@@ -104,9 +104,9 @@ pub fn run(
     }
 
     // Update state
-    try state.removeTool(id);
+    try state.removeTool(tool_id);
 
-    printToolUninstalled(id);
+    printToolUninstalled(tool_id);
 }
 
 // ─── Uninstall-specific print functions ───────────────────────────────────────

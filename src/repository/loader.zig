@@ -11,7 +11,7 @@ const builtin_repo_bytes: []const u8 = @embedFile("builtin-repository.json");
 pub fn loadBuiltinTools(allocator: std.mem.Allocator) !ExternalTools {
     var arena = std.heap.ArenaAllocator.init(allocator);
     errdefer arena.deinit();
-    const aa = arena.allocator();
+    const arena_alloc = arena.allocator();
 
     // Determine staleness from cache file mtime
     const dir_path = try configDir(allocator);
@@ -22,10 +22,10 @@ pub fn loadBuiltinTools(allocator: std.mem.Allocator) !ExternalTools {
 
     const now = std.time.timestamp();
     const stale: bool = blk: {
-        const f = std.fs.cwd().openFile(cache_path, .{}) catch break :blk true;
-        defer f.close();
-        const s = f.stat() catch break :blk true;
-        const mtime_s: i64 = @intCast(@divFloor(s.mtime, std.time.ns_per_s));
+        const cache_file = std.fs.cwd().openFile(cache_path, .{}) catch break :blk true;
+        defer cache_file.close();
+        const file_stat = cache_file.stat() catch break :blk true;
+        const mtime_s: i64 = @intCast(@divFloor(file_stat.mtime, std.time.ns_per_s));
         break :blk now - mtime_s > 86400;
     };
 
@@ -35,13 +35,13 @@ pub fn loadBuiltinTools(allocator: std.mem.Allocator) !ExternalTools {
     }
 
     // Try to use the cached file (freshly fetched or previously cached)
-    if (loadCachedTools(aa, allocator, builtin_repo_name)) |tools| {
+    if (loadCachedTools(arena_alloc, allocator, builtin_repo_name)) |tools| {
         return ExternalTools{ .arena = arena, .tools = tools };
     } else |_| {}
 
     // Fall back to the embedded JSON
-    const tools = parseRepositoryJson(aa, allocator, builtin_repo_bytes) catch
-        try aa.alloc(tool.Tool, 0);
+    const tools = parseRepositoryJson(arena_alloc, allocator, builtin_repo_bytes) catch
+        try arena_alloc.alloc(tool.Tool, 0);
     return ExternalTools{ .arena = arena, .tools = tools };
 }
 
@@ -72,9 +72,9 @@ pub fn configDir(allocator: std.mem.Allocator) ![]u8 {
 pub fn loadExternalTools(allocator: std.mem.Allocator) !ExternalTools {
     var arena = std.heap.ArenaAllocator.init(allocator);
     errdefer arena.deinit();
-    const aa = arena.allocator();
+    const arena_alloc = arena.allocator();
 
-    const sources = loadRepositories(aa, allocator) catch |e| switch (e) {
+    const sources = loadRepositories(arena_alloc, allocator) catch |e| switch (e) {
         error.FileNotFound, error.NoHome => return ExternalTools{ .arena = arena, .tools = &.{} },
         else => return ExternalTools{ .arena = arena, .tools = &.{} },
     };
@@ -89,13 +89,13 @@ pub fn loadExternalTools(allocator: std.mem.Allocator) !ExternalTools {
             fetchAndCache(allocator, source.name, source.url) catch {};
         }
 
-        const tools_slice = loadCachedTools(aa, allocator, source.name) catch continue;
-        try all_tools.appendSlice(aa, tools_slice);
+        const tools_slice = loadCachedTools(arena_alloc, allocator, source.name) catch continue;
+        try all_tools.appendSlice(arena_alloc, tools_slice);
     }
 
     return ExternalTools{
         .arena = arena,
-        .tools = try all_tools.toOwnedSlice(aa),
+        .tools = try all_tools.toOwnedSlice(arena_alloc),
     };
 }
 
@@ -114,7 +114,9 @@ pub fn loadRepositories(arena: std.mem.Allocator, allocator: std.mem.Allocator) 
     };
     defer file.close();
 
-    const content = try file.readToEndAlloc(allocator, 4 * 1024 * 1024);
+    var repos_read_buf: [4096]u8 = undefined;
+    var repos_reader = file.readerStreaming(&repos_read_buf);
+    const content = try repos_reader.interface.allocRemaining(allocator, .limited(4 * 1024 * 1024));
     defer allocator.free(content);
 
     return parseRepositoriesJson(arena, allocator, content);
@@ -175,7 +177,10 @@ pub fn saveRepositories(allocator: std.mem.Allocator, sources: []const Repositor
 
     const file = try std.fs.cwd().createFile(path, .{});
     defer file.close();
-    try file.writeAll(buf.items);
+    var save_write_buf: [4096]u8 = undefined;
+    var save_writer = file.writerStreaming(&save_write_buf);
+    try save_writer.interface.writeAll(buf.items);
+    try save_writer.interface.flush();
 }
 
 /// Fetch URL and write to repository-<name>.json cache. Also updates fetched_at.
@@ -196,7 +201,10 @@ pub fn fetchAndCache(allocator: std.mem.Allocator, name: []const u8, url: []cons
 
     const file = try std.fs.cwd().createFile(path, .{});
     defer file.close();
-    try file.writeAll(body);
+    var fetch_write_buf: [4096]u8 = undefined;
+    var fetch_writer = file.writerStreaming(&fetch_write_buf);
+    try fetch_writer.interface.writeAll(body);
+    try fetch_writer.interface.flush();
 
     try updateFetchedAt(allocator, name);
 }
@@ -204,12 +212,12 @@ pub fn fetchAndCache(allocator: std.mem.Allocator, name: []const u8, url: []cons
 fn updateFetchedAt(allocator: std.mem.Allocator, name: []const u8) !void {
     var arena = std.heap.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    const aa = arena.allocator();
+    const arena_alloc = arena.allocator();
 
-    const sources = loadRepositories(aa, allocator) catch return;
+    const sources = loadRepositories(arena_alloc, allocator) catch return;
 
     const now = std.time.timestamp();
-    const ts_str = try std.fmt.allocPrint(aa, "{d}", .{now});
+    const ts_str = try std.fmt.allocPrint(arena_alloc, "{d}", .{now});
 
     for (sources) |*s| {
         if (std.mem.eql(u8, s.name, name)) {
@@ -234,7 +242,9 @@ fn loadCachedTools(arena: std.mem.Allocator, allocator: std.mem.Allocator, name:
     const file = try std.fs.cwd().openFile(path, .{});
     defer file.close();
 
-    const content = try file.readToEndAlloc(allocator, 10 * 1024 * 1024);
+    var repo_read_buf: [4096]u8 = undefined;
+    var repo_reader = file.readerStreaming(&repo_read_buf);
+    const content = try repo_reader.interface.allocRemaining(allocator, .limited(10 * 1024 * 1024));
     defer allocator.free(content);
 
     return parseRepositoryJson(arena, allocator, content);
@@ -254,8 +264,8 @@ pub fn parseRepositoryJson(arena: std.mem.Allocator, allocator: std.mem.Allocato
     var list: std.ArrayList(tool.Tool) = .empty;
     for (tools_val.array.items) |item| {
         if (item != .object) continue;
-        const t = parseTool(arena, item.object) catch continue;
-        try list.append(arena, t);
+        const tool_item = parseTool(arena, item.object) catch continue;
+        try list.append(arena, tool_item);
     }
     return list.toOwnedSlice(arena);
 }
@@ -303,7 +313,7 @@ fn parseTool(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.Tool {
     // version_source
     const vs_val = obj.get("version_source") orelse return error.MissingVersionSource;
     if (vs_val != .object) return error.InvalidVersionSource;
-    const vs = try parseVersionSource(arena, vs_val.object);
+    const version_source = try parseVersionSource(arena, vs_val.object);
 
     // strategy
     const strat_val = obj.get("strategy") orelse return error.MissingStrategy;
@@ -317,11 +327,11 @@ fn parseTool(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.Tool {
 
     const shell_completions: ?tool.ShellCompletions = if (obj.get("shell_completions")) |sc_val| blk: {
         if (sc_val != .object) break :blk null;
-        const sc = sc_val.object;
+        const shell_completions_val = sc_val.object;
         break :blk tool.ShellCompletions{
-            .bash_cmd = if (sc.get("bash_cmd")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
-            .zsh_cmd = if (sc.get("zsh_cmd")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
-            .fish_cmd = if (sc.get("fish_cmd")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
+            .bash_cmd = if (shell_completions_val.get("bash_cmd")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
+            .zsh_cmd = if (shell_completions_val.get("zsh_cmd")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
+            .fish_cmd = if (shell_completions_val.get("fish_cmd")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
         };
     } else null;
 
@@ -362,7 +372,7 @@ fn parseTool(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.Tool {
         .groups = groups,
         .homepage = homepage,
         .brew_formula = brew_formula,
-        .version_source = vs,
+        .version_source = version_source,
         .strategy = strat,
         .shell_completions = shell_completions,
         .aliases = aliases,
@@ -374,9 +384,9 @@ fn parseTool(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.Tool {
 fn parseVersionSource(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.VersionSource {
     const type_val = obj.get("type") orelse return error.MissingType;
     if (type_val != .string) return error.InvalidType;
-    const t = type_val.string;
+    const type_str = type_val.string;
 
-    if (std.mem.eql(u8, t, "github_release")) {
+    if (std.mem.eql(u8, type_str, "github_release")) {
         const repo_val = obj.get("repo") orelse return error.MissingRepo;
         if (repo_val != .string) return error.InvalidRepo;
         return .{ .github_release = .{
@@ -384,23 +394,23 @@ fn parseVersionSource(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.V
             .filter = if (obj.get("filter")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
             .strip_prefix = if (obj.get("strip_prefix")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
         } };
-    } else if (std.mem.eql(u8, t, "hashicorp")) {
+    } else if (std.mem.eql(u8, type_str, "hashicorp")) {
         const prod = obj.get("product") orelse return error.MissingProduct;
         if (prod != .string) return error.InvalidProduct;
         return .{ .hashicorp = .{ .product = try arena.dupe(u8, prod.string) } };
-    } else if (std.mem.eql(u8, t, "k8s_stable_txt")) {
+    } else if (std.mem.eql(u8, type_str, "k8s_stable_txt")) {
         return .{ .k8s_stable_txt = {} };
-    } else if (std.mem.eql(u8, t, "pypi")) {
+    } else if (std.mem.eql(u8, type_str, "pypi")) {
         const pkg = obj.get("package") orelse return error.MissingPackage;
         if (pkg != .string) return error.InvalidPackage;
         return .{ .pypi = .{ .package = try arena.dupe(u8, pkg.string) } };
-    } else if (std.mem.eql(u8, t, "static")) {
+    } else if (std.mem.eql(u8, type_str, "static")) {
         const ver = obj.get("version") orelse return error.MissingVersion;
         if (ver != .string) return error.InvalidVersion;
         return .{ .static = .{ .version = try arena.dupe(u8, ver.string) } };
-    } else if (std.mem.eql(u8, t, "gcloud_sdk")) {
+    } else if (std.mem.eql(u8, type_str, "gcloud_sdk")) {
         return .{ .gcloud_sdk = {} };
-    } else if (std.mem.eql(u8, t, "github_tags")) {
+    } else if (std.mem.eql(u8, type_str, "github_tags")) {
         const repo_val = obj.get("repo") orelse return error.MissingRepo;
         if (repo_val != .string) return error.InvalidRepo;
         return .{ .github_tags = .{
@@ -416,9 +426,9 @@ fn parseVersionSource(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.V
 fn parseStrategy(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.InstallStrategy {
     const type_val = obj.get("type") orelse return error.MissingType;
     if (type_val != .string) return error.InvalidType;
-    const t = type_val.string;
+    const type_str = type_val.string;
 
-    if (std.mem.eql(u8, t, "github_release")) {
+    if (std.mem.eql(u8, type_str, "github_release")) {
         const url_tmpl = obj.get("url_template") orelse return error.MissingUrlTemplate;
         if (url_tmpl != .string) return error.InvalidUrlTemplate;
         const bin = if (obj.get("binary_in_archive")) |v| if (v == .string) try arena.dupe(u8, v.string) else "" else "";
@@ -428,15 +438,15 @@ fn parseStrategy(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.Instal
             .binary_in_archive = bin,
             .checksum_url_template = csum,
         } };
-    } else if (std.mem.eql(u8, t, "direct_binary")) {
+    } else if (std.mem.eql(u8, type_str, "direct_binary")) {
         const url_tmpl = obj.get("url_template") orelse return error.MissingUrlTemplate;
         if (url_tmpl != .string) return error.InvalidUrlTemplate;
         return .{ .direct_binary = .{ .url_template = try arena.dupe(u8, url_tmpl.string) } };
-    } else if (std.mem.eql(u8, t, "hashicorp_release")) {
+    } else if (std.mem.eql(u8, type_str, "hashicorp_release")) {
         const prod = obj.get("product") orelse return error.MissingProduct;
         if (prod != .string) return error.InvalidProduct;
         return .{ .hashicorp_release = .{ .product = try arena.dupe(u8, prod.string) } };
-    } else if (std.mem.eql(u8, t, "system_package")) {
+    } else if (std.mem.eql(u8, type_str, "system_package")) {
         return .{ .system_package = .{
             .pacman = if (obj.get("pacman")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
             .apt = if (obj.get("apt")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
@@ -448,7 +458,7 @@ fn parseStrategy(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.Instal
             .flatpak = if (obj.get("flatpak")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
             .snap = if (obj.get("snap")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
         } };
-    } else if (std.mem.eql(u8, t, "pip_venv")) {
+    } else if (std.mem.eql(u8, type_str, "pip_venv")) {
         const pkg = obj.get("package") orelse return error.MissingPackage;
         if (pkg != .string) return error.InvalidPackage;
         const dir = obj.get("install_dir_rel") orelse return error.MissingInstallDir;
@@ -460,7 +470,7 @@ fn parseStrategy(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.Instal
             .install_dir_rel = try arena.dupe(u8, dir.string),
             .binary_name = try arena.dupe(u8, bin.string),
         } };
-    } else if (std.mem.eql(u8, t, "tarball")) {
+    } else if (std.mem.eql(u8, type_str, "tarball")) {
         const url_tmpl = obj.get("url_template") orelse return error.MissingUrlTemplate;
         if (url_tmpl != .string) return error.InvalidUrlTemplate;
         const strip: u32 = if (obj.get("strip_components")) |v| switch (v) {
@@ -510,7 +520,7 @@ test "parseRepositoryJson: empty tools array" {
     const json =
         \\{"name":"test","tools":[]}
     ;
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    var gpa: std.heap.DebugAllocator(.{}) = .{};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
     var arena_inst = std.heap.ArenaAllocator.init(alloc);
@@ -534,7 +544,7 @@ test "parseRepositoryJson: single github_release tool" {
         \\  }]
         \\}
     ;
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    var gpa: std.heap.DebugAllocator(.{}) = .{};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
     var arena_inst = std.heap.ArenaAllocator.init(alloc);
@@ -551,7 +561,7 @@ test "parseRepositoryJson: invalid tool is skipped" {
     const json =
         \\{"name":"test","tools":[{"id":"","name":"","groups":[],"version_source":{},"strategy":{}}]}
     ;
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    var gpa: std.heap.DebugAllocator(.{}) = .{};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
     var arena_inst = std.heap.ArenaAllocator.init(alloc);
@@ -561,7 +571,7 @@ test "parseRepositoryJson: invalid tool is skipped" {
 }
 
 test "parseNameFromJson: valid" {
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    var gpa: std.heap.DebugAllocator(.{}) = .{};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
     const name = try parseNameFromJson(alloc, "{\"name\":\"myrepo\",\"tools\":[]}");
@@ -570,15 +580,15 @@ test "parseNameFromJson: valid" {
 }
 
 test "countToolsInJson: counts correctly" {
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    var gpa: std.heap.DebugAllocator(.{}) = .{};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
-    const n = countToolsInJson(alloc, "{\"name\":\"r\",\"tools\":[{},{},{}]}");
-    try std.testing.expectEqual(@as(usize, 3), n);
+    const count = countToolsInJson(alloc, "{\"name\":\"r\",\"tools\":[{},{},{}]}");
+    try std.testing.expectEqual(@as(usize, 3), count);
 }
 
 test "builtin_repo_bytes: parses all 19 built-in tools" {
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .{};
+    var gpa: std.heap.DebugAllocator(.{}) = .{};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
     var arena_inst = std.heap.ArenaAllocator.init(alloc);

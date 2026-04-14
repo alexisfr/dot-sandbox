@@ -49,14 +49,16 @@ fn formatTimestamp(ts_str: []const u8, buf: []u8) []const u8 {
     const year_day = epoch_secs.getEpochDay().calculateYearDay();
     const month_day = year_day.calculateMonthDay();
     const day_secs = secs % (24 * 3600);
-    const h = day_secs / 3600;
-    const m = (day_secs % 3600) / 60;
-    const s = day_secs % 60;
+    const hours = day_secs / 3600;
+    const minutes = (day_secs % 3600) / 60;
+    const seconds = day_secs % 60;
     return std.fmt.bufPrint(buf, "{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}", .{
         year_day.year,
         month_day.month.numeric(),
         month_day.day_index + 1,
-        h, m, s,
+        hours,
+        minutes,
+        seconds,
     }) catch ts_str;
 }
 
@@ -92,7 +94,6 @@ pub fn run(
     args: []const []const u8,
     state: *state_mod.State,
 ) !void {
-
     for (args) |a| {
         if (std.mem.eql(u8, a, "--help") or std.mem.eql(u8, a, "-h")) {
             output.printRaw(help);
@@ -110,24 +111,24 @@ pub fn run(
 
     // Collect keys and sort alphabetically
     var keys: [256][]const u8 = undefined;
-    var n: usize = 0;
+    var key_count: usize = 0;
     var kit = state.tools.iterator();
     while (kit.next()) |kv| {
-        keys[n] = kv.key_ptr.*;
-        n += 1;
+        keys[key_count] = kv.key_ptr.*;
+        key_count += 1;
     }
     const cmp = struct {
         fn lt(_: void, a: []const u8, b: []const u8) bool {
             return std.mem.lessThan(u8, a, b);
         }
     };
-    std.mem.sort([]const u8, keys[0..n], {}, cmp.lt);
+    std.mem.sort([]const u8, keys[0..key_count], {}, cmp.lt);
 
-    for (keys[0..n]) |k| {
-        const t = state.tools.get(k).?;
+    for (keys[0..key_count]) |key| {
+        const tool_entry = state.tools.get(key).?;
         var date_buf: [24]u8 = undefined;
-        const date = formatTimestamp(t.installed_at, &date_buf);
-        printStatusRow(k, t.version, date, t.method);
+        const date = formatTimestamp(tool_entry.installed_at, &date_buf);
+        printStatusRow(key, tool_entry.version, date, tool_entry.method);
     }
 
     printStatusFooter(state.tools.count());

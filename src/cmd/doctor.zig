@@ -43,10 +43,12 @@ fn printCheckFail(label: []const u8, detail: []const u8) void {
 
 fn printDoctorSummary(pass: usize, warn: usize, fail: usize) void {
     std.debug.print("\n{s}Summary:{s} {s}{d} passed{s}, {s}{d} warnings{s}, {s}{d} failed{s}\n\n", .{
-        output.bold,   output.reset,
-        output.green,  pass,  output.reset,
-        output.yellow, warn,  output.reset,
-        output.red,    fail,  output.reset,
+        output.bold,  output.reset,
+        output.green, pass,
+        output.reset, output.yellow,
+        warn,         output.reset,
+        output.red,   fail,
+        output.reset,
     });
 }
 
@@ -75,21 +77,21 @@ fn hasUnguardedInvocations(section: []const u8, tool_id: []const u8, shell: plat
     var guard_depth: usize = 0;
     var lines = std.mem.splitScalar(u8, section, '\n');
     while (lines.next()) |line| {
-        const t = std.mem.trim(u8, line, " \t\r");
-        if (t.len == 0 or t[0] == '#') continue;
+        const trimmed = std.mem.trim(u8, line, " \t\r");
+        if (trimmed.len == 0 or trimmed[0] == '#') continue;
 
         switch (shell) {
             .fish => {
-                if (std.mem.startsWith(u8, t, "if command -q ")) {
+                if (std.mem.startsWith(u8, trimmed, "if command -q ")) {
                     guard_depth += 1;
-                } else if (std.mem.eql(u8, t, "end")) {
+                } else if (std.mem.eql(u8, trimmed, "end")) {
                     if (guard_depth > 0) guard_depth -= 1;
-                } else if (guard_depth == 0 and isInvocation(t, tool_id)) {
+                } else if (guard_depth == 0 and isInvocation(trimmed, tool_id)) {
                     return true;
                 }
             },
             .bash, .zsh => {
-                if (isInvocation(t, tool_id) and !std.mem.startsWith(u8, t, "command -v ")) {
+                if (isInvocation(trimmed, tool_id) and !std.mem.startsWith(u8, trimmed, "command -v ")) {
                     return true;
                 }
             },
@@ -131,21 +133,26 @@ pub fn run(
     const home = std.posix.getenv("HOME") orelse "/tmp";
 
     // Platform
-    const os = platform.Os.current();
-    const arch = platform.Arch.current();
-    printCheckPass("OS", os.name()); pass += 1;
-    printCheckPass("Arch", arch.goName()); pass += 1;
+    const os_type = platform.OperatingSystem.current();
+    const arch_type = platform.Arch.current();
+    printCheckPass("OS", os_type.name());
+    pass += 1;
+    printCheckPass("Arch", arch_type.goName());
+    pass += 1;
 
     // Shell
-    const sh = platform.Shell.detect();
-    printCheckPass("Shell", sh.name()); pass += 1;
+    const shell_type = platform.Shell.detect();
+    printCheckPass("Shell", shell_type.name());
+    pass += 1;
 
     // Package manager
-    const pm = platform.PackageManager.detect();
-    if (pm != .unknown) {
-        printCheckPass("Package Manager", pm.command() orelse "unknown"); pass += 1;
+    const pkg_mgr = platform.PackageManager.detect();
+    if (pkg_mgr != .unknown) {
+        printCheckPass("Package Manager", pkg_mgr.command() orelse "unknown");
+        pass += 1;
     } else {
-        printCheckWarn("Package Manager", "none detected"); warn += 1;
+        printCheckWarn("Package Manager", "none detected");
+        warn += 1;
     }
 
     // ~/.local/bin in PATH
@@ -154,9 +161,11 @@ pub fn run(
     if (local_bin_abs) |lb| {
         defer allocator.free(lb);
         if (std.mem.indexOf(u8, path_env, lb) != null) {
-            printCheckPass("~/.local/bin in PATH", "yes"); pass += 1;
+            printCheckPass("~/.local/bin in PATH", "yes");
+            pass += 1;
         } else {
-            printCheckWarn("~/.local/bin in PATH", "not found — tools may not be accessible"); warn += 1;
+            printCheckWarn("~/.local/bin in PATH", "not found — tools may not be accessible");
+            warn += 1;
         }
     }
 
@@ -164,34 +173,37 @@ pub fn run(
     // system-package installs whose binary lands elsewhere in PATH.
     printDoctorSection("Installed Tools");
 
-    var it = state.tools.iterator();
-    while (it.next()) |kv| {
-        const id = kv.key_ptr.*;
-        const bin_path = std.fs.path.join(allocator, &.{ home, ".local", "bin", id }) catch continue;
+    var tool_iter = state.tools.iterator();
+    while (tool_iter.next()) |kv| {
+        const tool_id = kv.key_ptr.*;
+        const bin_path = std.fs.path.join(allocator, &.{ home, ".local", "bin", tool_id }) catch continue;
         defer allocator.free(bin_path);
 
         if (std.fs.cwd().access(bin_path, .{})) |_| {
-            printCheckPass(id, bin_path); pass += 1;
+            printCheckPass(tool_id, bin_path);
+            pass += 1;
             continue;
         } else |_| {}
 
         // Not in ~/.local/bin — try `which` (covers system_package installs)
         const result = std.process.Child.run(.{
             .allocator = allocator,
-            .argv = &.{ "which", id },
+            .argv = &.{ "which", tool_id },
             .max_output_bytes = 512,
         }) catch {
-            printCheckFail(id, "not found — run: dot install <tool> --force");
+            printCheckFail(tool_id, "not found — run: dot install <tool> --force");
             fail += 1;
             continue;
         };
         defer allocator.free(result.stdout);
         defer allocator.free(result.stderr);
         if (result.term == .Exited and result.term.Exited == 0) {
-            const found_path = std.mem.trimRight(u8, result.stdout, "\n");
-            printCheckPass(id, found_path); pass += 1;
+            const found_path = std.mem.trimEnd(u8, result.stdout, "\n");
+            printCheckPass(tool_id, found_path);
+            pass += 1;
         } else {
-            printCheckFail(id, "not found — run: dot install <tool> --force"); fail += 1;
+            printCheckFail(tool_id, "not found — run: dot install <tool> --force");
+            fail += 1;
         }
     }
 
@@ -200,24 +212,28 @@ pub fn run(
     printDoctorSection("State Consistency");
 
     var has_orphan = false;
-    var it2 = state.tools.iterator();
-    while (it2.next()) |kv| {
-        const id = kv.key_ptr.*;
-        if (std.mem.eql(u8, id, "dot")) continue;
+    var state_iter = state.tools.iterator();
+    while (state_iter.next()) |kv| {
+        const tool_id = kv.key_ptr.*;
+        if (std.mem.eql(u8, tool_id, "dot")) continue;
         var found = false;
         for (tools) |t| {
-            if (std.mem.eql(u8, t.id, id)) { found = true; break; }
+            if (std.mem.eql(u8, t.id, tool_id)) {
+                found = true;
+                break;
+            }
         }
         if (!found) {
-            const detail = std.fmt.allocPrint(allocator, "not in any repository — run: dot uninstall {s}", .{id}) catch null;
+            const detail = std.fmt.allocPrint(allocator, "not in any repository — run: dot uninstall {s}", .{tool_id}) catch null;
             defer if (detail) |d| allocator.free(d);
-            printCheckWarn(id, detail orelse "not in any repository");
+            printCheckWarn(tool_id, detail orelse "not in any repository");
             warn += 1;
             has_orphan = true;
         }
     }
     if (!has_orphan) {
-        printCheckPass("All state entries", "present in repository"); pass += 1;
+        printCheckPass("All state entries", "present in repository");
+        pass += 1;
     }
 
     // Shell integration: check file existence and scan for unguarded invocations.
@@ -232,29 +248,31 @@ pub fn run(
         defer allocator.free(integ_path);
 
         const content = blk: {
-            const f = std.fs.cwd().openFile(integ_path, .{}) catch {
-                if (check_sh == sh) {
+            const integ_file = std.fs.cwd().openFile(integ_path, .{}) catch {
+                if (check_sh == shell_type) {
                     printCheckWarn(check_sh.name(), "integration file not found (run a tool install to create it)");
                     warn += 1;
                 }
                 break :blk null;
             };
-            defer f.close();
-            break :blk f.readToEndAlloc(allocator, 4 * 1024 * 1024) catch null;
+            defer integ_file.close();
+            var integ_read_buf: [4096]u8 = undefined;
+            var integ_reader = integ_file.readerStreaming(&integ_read_buf);
+            break :blk integ_reader.interface.allocRemaining(allocator, .limited(4 * 1024 * 1024)) catch null;
         };
         const c = content orelse continue;
         defer allocator.free(c);
 
         var unguarded_found = false;
-        var it3 = state.tools.iterator();
-        while (it3.next()) |kv| {
-            const id = kv.key_ptr.*;
-            const section = extractSection(c, id, allocator) orelse continue;
+        var state_iter2 = state.tools.iterator();
+        while (state_iter2.next()) |kv| {
+            const tool_id = kv.key_ptr.*;
+            const section = extractSection(c, tool_id, allocator) orelse continue;
             defer allocator.free(section);
-            if (hasUnguardedInvocations(section, id, check_sh)) {
-                const label = std.fmt.allocPrint(allocator, "{s} ({s})", .{ id, check_sh.name() }) catch continue;
+            if (hasUnguardedInvocations(section, tool_id, check_sh)) {
+                const label = std.fmt.allocPrint(allocator, "{s} ({s})", .{ tool_id, check_sh.name() }) catch continue;
                 defer allocator.free(label);
-                const detail = std.fmt.allocPrint(allocator, "unguarded invocation — run: dot install {s} --force", .{id}) catch null;
+                const detail = std.fmt.allocPrint(allocator, "unguarded invocation — run: dot install {s} --force", .{tool_id}) catch null;
                 defer if (detail) |d| allocator.free(d);
                 printCheckWarn(label, detail orelse "unguarded invocation");
                 warn += 1;
@@ -263,7 +281,8 @@ pub fn run(
         }
 
         if (!unguarded_found) {
-            printCheckPass(check_sh.name(), integ_path); pass += 1;
+            printCheckPass(check_sh.name(), integ_path);
+            pass += 1;
         }
     }
 

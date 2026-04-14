@@ -39,8 +39,8 @@ pub fn run(
 
     // Resolve latest version from GitHub
     std.debug.print("{s} Checking latest dot version...\n", .{output.sym_search});
-    const vs = tool_mod.VersionSource{ .github_release = .{ .repo = version_mod.github_repo } };
-    const latest = vs.resolve(allocator) catch |e| {
+    const version_source = tool_mod.VersionSource{ .github_release = .{ .repo = version_mod.github_repo } };
+    const latest = version_source.resolve(allocator) catch |e| {
         const api_url = "https://api.github.com/repos/" ++ version_mod.github_repo ++ "/releases";
         switch (e) {
             error.VersionFetchFailed => {
@@ -76,13 +76,13 @@ pub fn run(
         output.sym_install, output.bold, output.reset, current, latest,
     });
 
-    const os = platform.Os.current();
-    const arch = platform.Arch.current();
+    const os_type = platform.OperatingSystem.current();
+    const arch_type = platform.Arch.current();
 
     const url = try std.fmt.allocPrint(
         allocator,
         "https://github.com/{s}/releases/download/v{s}/dot-{s}-{s}.tar.gz",
-        .{ version_mod.github_repo, latest, os.name(), arch.goName() },
+        .{ version_mod.github_repo, latest, os_type.name(), arch_type.goName() },
     );
     defer allocator.free(url);
 
@@ -160,7 +160,7 @@ pub fn run(
 
     std.debug.print("\n{s}{s}{s} dot updated to {s}{s}{s}!\n\n", .{
         output.green, output.sym_check, output.reset,
-        output.bold, latest,                output.reset,
+        output.bold,  latest,           output.reset,
     });
 }
 

@@ -32,9 +32,9 @@ const desc_min: usize = 10;
 fn getTermWidth() usize {
     if (comptime builtin.os.tag == .linux) {
         const Winsize = extern struct { ws_row: u16, ws_col: u16, ws_xpixel: u16, ws_ypixel: u16 };
-        var ws = std.mem.zeroes(Winsize);
-        _ = std.os.linux.ioctl(1, 0x5413, @intFromPtr(&ws)); // TIOCGWINSZ
-        if (ws.ws_col > 0) return @as(usize, ws.ws_col);
+        var winsize = std.mem.zeroes(Winsize);
+        _ = std.os.linux.ioctl(1, 0x5413, @intFromPtr(&winsize)); // TIOCGWINSZ
+        if (winsize.ws_col > 0) return @as(usize, winsize.ws_col);
     }
     if (std.posix.getenv("COLUMNS")) |cols| return std.fmt.parseInt(usize, cols, 10) catch 80;
     return 80;
@@ -55,12 +55,12 @@ pub fn run(
 
     var group_filter: ?tool_mod.Group = null;
 
-    var i: usize = 0;
-    while (i < args.len) : (i += 1) {
-        const a = args[i];
-        if (std.mem.eql(u8, a, "--group") or std.mem.eql(u8, a, "-g")) {
-            i += 1;
-            if (i < args.len) group_filter = parseGroup(args[i]);
+    var arg_idx: usize = 0;
+    while (arg_idx < args.len) : (arg_idx += 1) {
+        const arg = args[arg_idx];
+        if (std.mem.eql(u8, arg, "--group") or std.mem.eql(u8, arg, "-g")) {
+            arg_idx += 1;
+            if (arg_idx < args.len) group_filter = parseGroup(args[arg_idx]);
         }
     }
 
@@ -74,23 +74,25 @@ pub fn run(
         if (group_filter) |gf| {
             var in_group = false;
             for (t.groups) |g| {
-                if (g == gf) { in_group = true; break; }
+                if (g == gf) {
+                    in_group = true;
+                    break;
+                }
             }
             if (!in_group) continue;
         }
 
         var groups_buf: [64]u8 = undefined;
-        var groups_str = std.io.fixedBufferStream(&groups_buf);
-        const gw = groups_str.writer();
-        for (t.groups, 0..) |g, idx| {
-            if (idx > 0) gw.writeByte(',') catch {};
-            gw.writeAll(@tagName(g)) catch {};
+        var groups_writer: std.Io.Writer = .fixed(&groups_buf);
+        for (t.groups, 0..) |group, idx| {
+            if (idx > 0) groups_writer.writeByte(',') catch {};
+            groups_writer.writeAll(@tagName(group)) catch {};
         }
 
         const maybe_entry = state.tools.get(t.id);
         const version: ?[]const u8 = if (maybe_entry) |e| e.version else null;
         const sys = if (version == null) isSystemInstalled(allocator, t.id) else false;
-        printListRow(t.id, t.aliases, t.description, version, sys, groups_str.getWritten(), desc_width);
+        printListRow(t.id, t.aliases, t.description, version, sys, groups_writer.buffered(), desc_width);
         count += 1;
     }
 
@@ -119,7 +121,9 @@ fn truncDesc(desc: []const u8, max_visual: usize, buf: []u8) struct { str: []con
     while (end > 0 and desc[end] != ' ') : (end -= 1) {}
     const cut = if (end == 0) max_visual - 1 else end;
     @memcpy(buf[0..cut], desc[0..cut]);
-    buf[cut] = 0xe2; buf[cut + 1] = 0x80; buf[cut + 2] = 0xa6; // UTF-8 '…'
+    buf[cut] = 0xe2;
+    buf[cut + 1] = 0x80;
+    buf[cut + 2] = 0xa6; // UTF-8 '…'
     return .{ .str = buf[0 .. cut + 3], .visual = cut + 1 };
 }
 
@@ -142,15 +146,14 @@ fn printListRow(id: []const u8, aliases: []const []const u8, desc: []const u8, v
     if (aliases.len > 0) {
         // Build alias string e.g. "(k)" or "(k,tf)"
         var alias_buf: [32]u8 = undefined;
-        var alias_fbs = std.io.fixedBufferStream(&alias_buf);
-        const aw = alias_fbs.writer();
-        aw.writeByte('(') catch {};
-        for (aliases, 0..) |a, i| {
-            if (i > 0) aw.writeByte(',') catch {};
-            aw.writeAll(a) catch {};
+        var alias_writer: std.Io.Writer = .fixed(&alias_buf);
+        alias_writer.writeByte('(') catch {};
+        for (aliases, 0..) |alias_item, idx| {
+            if (idx > 0) alias_writer.writeByte(',') catch {};
+            alias_writer.writeAll(alias_item) catch {};
         }
-        aw.writeByte(')') catch {};
-        const alias_str = alias_fbs.getWritten();
+        alias_writer.writeByte(')') catch {};
+        const alias_str = alias_writer.buffered();
 
         // Visual width: id + 1 space + alias_str
         const visual = id_trunc.len + 1 + alias_str.len;
@@ -191,26 +194,26 @@ test "truncDesc" {
     var buf: [512]u8 = undefined;
 
     // Short string — returned as-is
-    const r1 = truncDesc("hello", 20, &buf);
-    try std.testing.expectEqualStrings("hello", r1.str);
-    try std.testing.expectEqual(@as(usize, 5), r1.visual);
+    const res1 = truncDesc("hello", 20, &buf);
+    try std.testing.expectEqualStrings("hello", res1.str);
+    try std.testing.expectEqual(@as(usize, 5), res1.visual);
 
     // Exactly max_visual — no truncation
-    const r2 = truncDesc("hello world", 11, &buf);
-    try std.testing.expectEqualStrings("hello world", r2.str);
-    try std.testing.expectEqual(@as(usize, 11), r2.visual);
+    const res2 = truncDesc("hello world", 11, &buf);
+    try std.testing.expectEqualStrings("hello world", res2.str);
+    try std.testing.expectEqual(@as(usize, 11), res2.visual);
 
     // Truncate at word boundary: "hello world foo", max=12
     // end=11 → desc[11]=' ' → cut=11 → "hello world…", visual=12
-    const r3 = truncDesc("hello world foo", 12, &buf);
-    try std.testing.expectEqualStrings("hello world\xe2\x80\xa6", r3.str);
-    try std.testing.expectEqual(@as(usize, 12), r3.visual);
+    const res3 = truncDesc("hello world foo", 12, &buf);
+    try std.testing.expectEqualStrings("hello world\xe2\x80\xa6", res3.str);
+    try std.testing.expectEqual(@as(usize, 12), res3.visual);
 
     // No space found — hard cut at max_visual-1
     // "helloworldfoo", max=5 → cut=4 → "hell…", visual=5
-    const r4 = truncDesc("helloworldfoo", 5, &buf);
-    try std.testing.expectEqualStrings("hell\xe2\x80\xa6", r4.str);
-    try std.testing.expectEqual(@as(usize, 5), r4.visual);
+    const res4 = truncDesc("helloworldfoo", 5, &buf);
+    try std.testing.expectEqualStrings("hell\xe2\x80\xa6", res4.str);
+    try std.testing.expectEqual(@as(usize, 5), res4.visual);
 }
 
 test "parseGroup" {
