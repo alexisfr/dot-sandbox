@@ -13,7 +13,7 @@ const help =
     \\  --group, -g <g>   Show only tools in the given group
     \\  --help, -h        Show this help
     \\
-    \\Groups:  k8s, cloud, iac, containers, utils, terminal, all
+    \\Groups:  k8s, cloud, iac, containers, utils, terminal, config, all
     \\
     \\Examples:
     \\  dot list
@@ -69,19 +69,32 @@ pub fn run(
 
     printListHeader(term_width);
 
-    var count: usize = 0;
-    for (tools) |t| {
+    // Collect matching tools, then sort by first group name (alphabetical), then by id.
+    var matched: std.ArrayList(*const tool_mod.Tool) = .empty;
+    defer matched.deinit(allocator);
+    for (tools) |*t| {
         if (group_filter) |gf| {
             var in_group = false;
             for (t.groups) |g| {
-                if (g == gf) {
-                    in_group = true;
-                    break;
-                }
+                if (g == gf) { in_group = true; break; }
             }
             if (!in_group) continue;
         }
+        try matched.append(allocator, t);
+    }
 
+    const cmp = struct {
+        fn lt(_: void, a: *const tool_mod.Tool, b: *const tool_mod.Tool) bool {
+            const ga = if (a.groups.len > 0) @tagName(a.groups[0]) else "";
+            const gb = if (b.groups.len > 0) @tagName(b.groups[0]) else "";
+            const gcmp = std.mem.order(u8, ga, gb);
+            if (gcmp != .eq) return gcmp == .lt;
+            return std.mem.lessThan(u8, a.id, b.id);
+        }
+    };
+    std.mem.sort(*const tool_mod.Tool, matched.items, {}, cmp.lt);
+
+    for (matched.items) |t| {
         var groups_buf: [64]u8 = undefined;
         var groups_writer: std.Io.Writer = .fixed(&groups_buf);
         for (t.groups, 0..) |group, idx| {
@@ -93,11 +106,10 @@ pub fn run(
         const version: ?[]const u8 = if (maybe_entry) |e| e.version else null;
         const sys = if (version == null) isSystemInstalled(allocator, t.id) else false;
         printListRow(t.id, t.aliases, t.description, version, sys, groups_writer.buffered(), desc_width);
-        count += 1;
     }
 
     const filter_name: ?[]const u8 = if (group_filter) |gf| @tagName(gf) else null;
-    printListFooter(count, filter_name);
+    printListFooter(matched.items.len, filter_name);
 }
 
 // ─── List-specific print functions ────────────────────────────────────────────
@@ -164,12 +176,22 @@ fn printListRow(id: []const u8, aliases: []const []const u8, desc: []const u8, v
         std.debug.print("{s:<16} ", .{id_trunc});
     }
 
-    // status column: 14 visual chars + 1 trailing space = 15 total
+    // status column: 14 visual chars + 1 trailing space = 15 total.
+    // sym_ok and sym_warn have variable visual widths in plain mode ("ok"=2, "WARN"=4),
+    // so padding is computed as: 13 - sym_width - text_len spaces after the text.
     if (version) |v| {
         const v_trunc = v[0..@min(v.len, 12)];
-        std.debug.print("{s}{s} {s:<12}{s} ", .{ output.green, output.sym_ok, v_trunc, output.reset });
+        const text_visual = output.sym_ok_w + 1 + v_trunc.len; // sym + space + text
+        const pad = if (14 > text_visual) 14 - text_visual else 0;
+        std.debug.print("{s}{s} {s}{s}", .{ output.green, output.sym_ok, v_trunc, output.reset });
+        for (0..pad) |_| std.debug.print(" ", .{});
+        std.debug.print(" ", .{});
     } else if (sys) {
-        std.debug.print("{s}{s} {s:<12}{s} ", .{ output.yellow, output.sym_warn, "system", output.reset });
+        const text_visual = output.sym_warn_w + 1 + "system".len; // sym + space + text
+        const pad = if (14 > text_visual) 14 - text_visual else 0;
+        std.debug.print("{s}{s} system{s}", .{ output.yellow, output.sym_warn, output.reset });
+        for (0..pad) |_| std.debug.print(" ", .{});
+        std.debug.print(" ", .{});
     } else {
         std.debug.print("{s}not installed{s}  ", .{ output.dim, output.reset });
     }
@@ -222,6 +244,7 @@ test "parseGroup" {
     try std.testing.expectEqual(@as(?tool_mod.Group, .k8s), parseGroup("k8s"));
     try std.testing.expectEqual(@as(?tool_mod.Group, .cloud), parseGroup("cloud"));
     try std.testing.expectEqual(@as(?tool_mod.Group, .containers), parseGroup("containers"));
+    try std.testing.expectEqual(@as(?tool_mod.Group, .config), parseGroup("config"));
 }
 
 fn parseGroup(name: []const u8) ?tool_mod.Group {
@@ -232,5 +255,6 @@ fn parseGroup(name: []const u8) ?tool_mod.Group {
     if (std.mem.eql(u8, name, "containers")) return .containers;
     if (std.mem.eql(u8, name, "utils")) return .utils;
     if (std.mem.eql(u8, name, "terminal")) return .terminal;
+    if (std.mem.eql(u8, name, "config")) return .config;
     return null;
 }

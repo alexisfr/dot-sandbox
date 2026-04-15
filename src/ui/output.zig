@@ -29,8 +29,10 @@ pub fn initCaps() void {
         bold = "";
         reset = "";
         sym_ok = "ok";
+        sym_ok_w = 2;
         sym_fail = "FAIL";
         sym_warn = "WARN";
+        sym_warn_w = 4;
         sym_check = "[OK]";
         sym_pin = "[PIN]";
         sym_list = "[INFO]";
@@ -82,6 +84,10 @@ pub var sym_dash: []const u8 = "─";
 pub var sym_arrow: []const u8 = "→";
 /// Install action indicator: "🔧" in rich mode, "[IN]" in plain/pipe.
 pub var sym_install: []const u8 = "🔧";
+/// Visual width of sym_ok (1 in rich mode, 2 in plain/pipe for "ok").
+pub var sym_ok_w: usize = 1;
+/// Visual width of sym_warn (1 in rich mode, 4 in plain/pipe for "WARN").
+pub var sym_warn_w: usize = 1;
 
 // ─── Common print functions ───────────────────────────────────────────────────
 

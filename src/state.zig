@@ -41,11 +41,8 @@ pub const State = struct {
             .tools = tools,
         };
 
-        // Try to load existing state; ignore if missing
-        state.load() catch |e| switch (e) {
-            error.FileNotFound => {},
-            else => {},
-        };
+        // Try to load existing state; ignore if missing or unreadable
+        state.load() catch {};
 
         return state;
     }

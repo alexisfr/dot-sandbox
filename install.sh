@@ -57,8 +57,8 @@ echo "  Installed to $BIN_DIR/dot"
 
 # ── 4. Shell integration (mirrors shell.zig:ensureSourced) ───────────────────
 
-SOURCE_MARKER="# SOURCE SHELL INTEGRATION"
-PATH_MARKER="# ADD LOCAL BIN TO PATH"
+SOURCE_MARKER="# dot: source shell integration"
+PATH_MARKER="# dot: add local bin to PATH"
 
 setup_shell_integration() {
   shell_name="$1"    # bash | zsh | fish
