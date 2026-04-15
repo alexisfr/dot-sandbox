@@ -1,51 +1,75 @@
 # dot — The DevOps Toolbox
 
-A fast, single-binary CLI tool manager for DevOps practitioners. Install and manage
-helm, kubectl, terraform, jq and more — with shell completions and aliases wired up
-automatically.
+A single-binary CLI that installs and manages your DevOps tools — helm, kubectl,
+terraform, jq and more — with shell completions and aliases wired up automatically.
 
-## Quick install
+## Why does this exist?
+
+Great question. You probably shouldn't use this. You have options:
+
+- **Homebrew** — works great, as long as you enjoy waiting for Ruby to update
+  `libiconv` before you can install `kubectl`
+- **Nix / NixOS** — the correct answer, assuming you have a week to write the
+  derivation and a therapist on retainer
+- **webi** — genuinely good, but then you'd have nothing to complain about at
+  standup
+- **mise / asdf** — excellent if your team already agrees on a version manager,
+  which they don't
+- **manual `curl | tar | mv`** — this is just `dot install` with extra steps
+
+`dot` exists because sometimes you just want to run one command on a fresh VM,
+get `kubectl`, `helm`, `terraform` and their completions, and go back to
+actually doing your job.
+
+## Install
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/the-devops-hub/dot/main/install.sh | sh
 ```
 
-Then restart your shell or run `source ~/.config/fish/config.fish` (fish) / `source ~/.zshrc` (zsh).
-
-## Usage
+Restart your shell (or `source ~/.zshrc` / `source ~/.config/fish/config.fish`), then:
 
 ```sh
-dot list                        # Show all tools and their install status
-dot install helm                # Install a tool
-dot install --group k8s         # Install all tools in a group
-dot upgrade                     # Upgrade all installed tools
-dot upgrade helm                # Upgrade a specific tool
-dot uninstall helm              # Remove a tool
-dot status                      # Show installed versions, flag outdated
-dot doctor                      # System health check
+dot install --group k8s     # kubectl, helm, k9s, kubelogin
+dot install --group iac     # terraform, vault
+dot install --group all     # everything, no regrets
+```
+
+## Commands
+
+```sh
+dot list                    # what's available
+dot install <tool>          # install a tool
+dot install --group <name>  # install a group
+dot upgrade                 # upgrade everything
+dot upgrade <tool>          # upgrade one thing
+dot uninstall <tool>        # remove a tool
+dot status                  # versions + outdated check
+dot update                  # update dot itself
+dot doctor                  # health check
 ```
 
 ## Groups
 
-```sh
-dot install --group k8s         # helm, kubectl, k9s, kubelogin
-dot install --group iac         # terraform, vault
-dot install --group cloud       # aws, gcloud, oci
-dot install --group containers  # podman
-dot install --group utils       # jq, gh, btop
-dot install --group terminal    # starship
-dot install --group all         # everything
-```
+| Group | Tools |
+|---|---|
+| `k8s` | helm, kubectl, k9s, kubelogin |
+| `iac` | terraform, vault, tflint, terraform-docs, hcledit |
+| `cloud` | aws, gcloud, oci |
+| `containers` | podman |
+| `utils` | jq, yq, gh, btop |
+| `terminal` | starship |
+| `all` | everything above |
 
 ## Shell integration
 
 After installing a tool, dot writes completions and aliases to a shell integration
-file sourced from your RC file. Aliases (e.g. `k` for kubectl, `tf` for terraform)
-get completion delegation so tab-complete works on the alias too.
+file sourced from your RC. Aliases like `k` (kubectl) and `tf` (terraform) get
+completion delegation, so tab-complete works on the alias too.
 
 ## External repositories
 
-dot supports external tool repositories — JSON files hosted anywhere:
+Host your own tools as a JSON file and add them:
 
 ```sh
 dot repository add https://example.com/my-tools/repository.json
@@ -53,6 +77,8 @@ dot repository list
 dot repository update
 dot repository remove my-tools
 ```
+
+External tools override builtins with the same ID, so you can pin or replace anything.
 
 ## Build from source
 
@@ -62,7 +88,7 @@ Requires [Zig 0.15.2](https://ziglang.org/download/).
 git clone https://github.com/the-devops-hub/dot
 cd dot
 zig build -Doptimize=ReleaseFast
-sudo cp zig-out/bin/dot /usr/local/bin/dot
+cp zig-out/bin/dot ~/.local/bin/dot
 ```
 
 ## License
