@@ -54,10 +54,11 @@ dot doctor                  # health check
 | Group | Tools |
 |---|---|
 | `k8s` | helm, kubectl, k9s, kubelogin |
-| `iac` | terraform, vault, tflint, terraform-docs, hcledit |
+| `iac` | terraform, opentofu, vault, tflint, terraform-docs, hcledit, terragrunt |
+| `config` | ansible, gh |
 | `cloud` | aws, gcloud, oci |
 | `containers` | podman |
-| `utils` | jq, yq, gh, btop |
+| `utils` | jq, yq, btop |
 | `terminal` | starship |
 | `all` | everything above |
 

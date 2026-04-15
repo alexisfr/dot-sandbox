@@ -4,7 +4,7 @@ const platform = @import("platform.zig");
 const archive = @import("archive.zig");
 const output = @import("ui/output.zig");
 
-pub const Group = enum { k8s, cloud, iac, containers, utils, terminal };
+pub const Group = enum { k8s, cloud, iac, containers, utils, terminal, config };
 
 // ─── Version resolution ───────────────────────────────────────────────────────
 
@@ -385,6 +385,8 @@ pub const InstallStrategy = union(enum) {
         install_dir_rel: []const u8,
         /// Name of the binary inside the venv's bin/
         binary_name: []const u8,
+        /// Additional binaries in the venv's bin/ to symlink alongside binary_name.
+        extra_binaries: []const []const u8 = &.{},
 
         pub fn execute(self: PipVenv, ctx: *InstallContext) !void {
             const home = std.posix.getenv("HOME") orelse "/tmp";
@@ -416,16 +418,27 @@ pub const InstallStrategy = union(enum) {
             defer ctx.allocator.free(pip_result.stderr);
             if (pip_result.term.Exited != 0) return error.PipInstallFailed;
 
-            // Symlink binary to bin_dir
+            std.fs.cwd().makePath(ctx.bin_dir) catch {};
+
+            // Symlink primary binary to bin_dir
             const src = try std.fs.path.join(ctx.allocator, &.{ install_dir, "bin", self.binary_name });
             defer ctx.allocator.free(src);
 
             const dst = try std.fs.path.join(ctx.allocator, &.{ ctx.bin_dir, self.binary_name });
             defer ctx.allocator.free(dst);
 
-            std.fs.cwd().makePath(ctx.bin_dir) catch {};
             std.fs.cwd().deleteFile(dst) catch {};
             try std.fs.cwd().symLink(src, dst, .{});
+
+            // Symlink any extra binaries (e.g. ansible-playbook, ansible-vault, …)
+            for (self.extra_binaries) |extra| {
+                const extra_src = try std.fs.path.join(ctx.allocator, &.{ install_dir, "bin", extra });
+                defer ctx.allocator.free(extra_src);
+                const extra_dst = try std.fs.path.join(ctx.allocator, &.{ ctx.bin_dir, extra });
+                defer ctx.allocator.free(extra_dst);
+                std.fs.cwd().deleteFile(extra_dst) catch {};
+                try std.fs.cwd().symLink(extra_src, extra_dst, .{});
+            }
         }
     };
 

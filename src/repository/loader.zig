@@ -465,10 +465,20 @@ fn parseStrategy(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.Instal
         if (dir != .string) return error.InvalidInstallDir;
         const bin = obj.get("binary_name") orelse return error.MissingBinaryName;
         if (bin != .string) return error.InvalidBinaryName;
+        const extra_binaries: []const []const u8 = if (obj.get("extra_binaries")) |ev| blk: {
+            if (ev != .array) break :blk &.{};
+            var list: std.ArrayList([]const u8) = .empty;
+            for (ev.array.items) |item| {
+                if (item != .string) continue;
+                try list.append(arena, try arena.dupe(u8, item.string));
+            }
+            break :blk try list.toOwnedSlice(arena);
+        } else &.{};
         return .{ .pip_venv = .{
             .package = try arena.dupe(u8, pkg.string),
             .install_dir_rel = try arena.dupe(u8, dir.string),
             .binary_name = try arena.dupe(u8, bin.string),
+            .extra_binaries = extra_binaries,
         } };
     } else if (std.mem.eql(u8, type_str, "tarball")) {
         const url_tmpl = obj.get("url_template") orelse return error.MissingUrlTemplate;
@@ -511,6 +521,7 @@ fn parseGroupStr(name: []const u8) ?tool.Group {
     if (std.mem.eql(u8, name, "containers")) return .containers;
     if (std.mem.eql(u8, name, "utils")) return .utils;
     if (std.mem.eql(u8, name, "terminal")) return .terminal;
+    if (std.mem.eql(u8, name, "config")) return .config;
     return null;
 }
 
@@ -594,5 +605,5 @@ test "builtin_repo_bytes: parses all 19 built-in tools" {
     var arena_inst = std.heap.ArenaAllocator.init(alloc);
     defer arena_inst.deinit();
     const tools = try parseRepositoryJson(arena_inst.allocator(), alloc, builtin_repo_bytes);
-    try std.testing.expectEqual(@as(usize, 19), tools.len);
+    try std.testing.expectEqual(@as(usize, 22), tools.len);
 }

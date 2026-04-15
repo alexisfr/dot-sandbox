@@ -245,6 +245,79 @@
             }
         },
         {
+            "id": "ansible",
+            "name": "Ansible",
+            "description": "IT automation platform for configuration management and deployment",
+            "groups": [
+                "config"
+            ],
+            "homepage": "https://www.ansible.com",
+            "brew_formula": "ansible",
+            "version_source": {
+                "type": "pypi",
+                "package": "ansible"
+            },
+            "strategy": {
+                "type": "pip_venv",
+                "package": "ansible",
+                "install_dir_rel": "~/.local/opt/ansible",
+                "binary_name": "ansible",
+                "extra_binaries": [
+                    "ansible-playbook",
+                    "ansible-vault",
+                    "ansible-galaxy",
+                    "ansible-doc"
+                ]
+            }
+        },
+        {
+            "id": "terragrunt",
+            "name": "Terragrunt",
+            "description": "Thin wrapper for Terraform/OpenTofu that provides DRY configurations and remote state management",
+            "groups": [
+                "iac"
+            ],
+            "homepage": "https://terragrunt.gruntwork.io",
+            "brew_formula": "terragrunt",
+            "aliases": [
+                "tg"
+            ],
+            "version_source": {
+                "type": "github_release",
+                "repo": "gruntwork-io/terragrunt",
+                "strip_prefix": "v"
+            },
+            "strategy": {
+                "type": "direct_binary",
+                "url_template": "https://github.com/gruntwork-io/terragrunt/releases/download/v{version}/terragrunt_{os}_{arch}"
+            }
+        },
+        {
+            "id": "opentofu",
+            "name": "OpenTofu",
+            "description": "Open-source fork of Terraform — community-governed drop-in replacement",
+            "groups": [
+                "iac"
+            ],
+            "homepage": "https://opentofu.org",
+            "brew_formula": "opentofu",
+            "version_source": {
+                "type": "github_release",
+                "repo": "opentofu/opentofu",
+                "strip_prefix": "v"
+            },
+            "strategy": {
+                "type": "github_release",
+                "url_template": "https://github.com/opentofu/opentofu/releases/download/v{version}/tofu_{version}_{os}_{arch}.zip",
+                "binary_in_archive": "tofu"
+            },
+            "shell_completions": {
+                "bash_cmd": "complete -C tofu tofu",
+                "zsh_cmd": "complete -C tofu tofu",
+                "fish_cmd": null
+            }
+        },
+        {
             "id": "yq",
             "name": "yq",
             "description": "Portable command-line YAML, JSON, XML and CSV processor",
@@ -291,7 +364,7 @@
             "name": "GitHub CLI",
             "description": "GitHub's official command line tool",
             "groups": [
-                "utils"
+                "config"
             ],
             "homepage": "https://cli.github.com",
             "brew_formula": "gh",
