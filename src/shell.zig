@@ -1,7 +1,7 @@
 const std = @import("std");
 const platform = @import("platform.zig");
 
-const source_marker = "# dot: source shell integration";
+pub const source_marker = "# dot: source shell integration";
 const path_marker = "# dot: add local bin to PATH";
 
 /// Ensure the centralized integration file is sourced from the shell's RC.

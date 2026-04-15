@@ -3,6 +3,7 @@ const state_mod = @import("../state.zig");
 const tool_mod = @import("../tool.zig");
 const platform = @import("../platform.zig");
 const output = @import("../ui/output.zig");
+const shell_mod = @import("../shell.zig");
 
 const help =
     \\Usage: dot doctor
@@ -109,6 +110,24 @@ fn isInvocation(line: []const u8, tool_id: []const u8) bool {
     if (!std.mem.startsWith(u8, line, tool_id)) return false;
     if (line.len == tool_id.len) return true;
     return line[tool_id.len] == ' ' or line[tool_id.len] == '|' or line[tool_id.len] == '\t';
+}
+
+/// Returns true if the shell's RC file contains the dot source marker.
+fn rcHasSourceMarker(shell: platform.Shell, home: []const u8, allocator: std.mem.Allocator) bool {
+    const rc_path: []u8 = switch (shell) {
+        .bash => std.fs.path.join(allocator, &.{ home, ".bashrc" }) catch return false,
+        .zsh => std.fs.path.join(allocator, &.{ home, ".zshrc" }) catch return false,
+        .fish => std.fs.path.join(allocator, &.{ home, ".config", "fish", "config.fish" }) catch return false,
+        .unknown => return true,
+    };
+    defer allocator.free(rc_path);
+    const rc_file = std.fs.cwd().openFile(rc_path, .{}) catch return false;
+    defer rc_file.close();
+    var buf: [4096]u8 = undefined;
+    var reader = rc_file.readerStreaming(&buf);
+    const content = reader.interface.allocRemaining(allocator, .limited(1024 * 1024)) catch return false;
+    defer allocator.free(content);
+    return std.mem.indexOf(u8, content, shell_mod.source_marker) != null;
 }
 
 pub fn run(
@@ -236,8 +255,8 @@ pub fn run(
         pass += 1;
     }
 
-    // Shell integration: check file existence and scan for unguarded invocations.
-    // All known shells are checked; only the active shell's missing file is a warning.
+    // Shell integration: for the active shell, check and auto-fix the integration
+    // file and RC source block. For all shells, scan for unguarded invocations.
     printDoctorSection("Shell Integration");
 
     const all_shells = [_]platform.Shell{ .bash, .zsh, .fish };
@@ -247,14 +266,32 @@ pub fn run(
         }) catch continue;
         defer allocator.free(integ_path);
 
-        const content = blk: {
-            const integ_file = std.fs.cwd().openFile(integ_path, .{}) catch {
-                if (check_sh == shell_type) {
-                    printCheckWarn(check_sh.name(), "integration file not found (run a tool install to create it)");
+        // For the active shell: check state before acting, then auto-fix.
+        if (check_sh == shell_type) {
+            const had_file = if (std.fs.cwd().access(integ_path, .{})) |_| true else |_| false;
+            const had_source = rcHasSourceMarker(check_sh, home, allocator);
+
+            if (!had_file or !had_source) {
+                // Fix both issues in one call — ensureSourced is idempotent.
+                shell_mod.ensureSourced(check_sh, allocator) catch {};
+
+                if (!had_file) {
+                    printCheckWarn(check_sh.name(), "integration file missing — recreated (run: dot install --force to restore tool sections)");
                     warn += 1;
                 }
-                break :blk null;
-            };
+                if (!had_source) {
+                    printCheckWarn(check_sh.name(), "RC source block missing — added (restart your shell or source your RC)");
+                    warn += 1;
+                }
+                // A freshly recreated file is empty — no unguarded invocations possible.
+                if (!had_file) continue;
+            }
+        }
+
+        // Read integration file for unguarded invocation scan.
+        // Non-active shells: silently skip if the file doesn't exist.
+        const content = blk: {
+            const integ_file = std.fs.cwd().openFile(integ_path, .{}) catch break :blk null;
             defer integ_file.close();
             var integ_read_buf: [4096]u8 = undefined;
             var integ_reader = integ_file.readerStreaming(&integ_read_buf);
