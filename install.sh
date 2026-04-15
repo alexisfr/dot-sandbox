@@ -27,9 +27,9 @@ case "$ARCH" in
     ;;
 esac
 
-# ── 2. Download + extract ─────────────────────────────────────────────────────
+# ── 2. Download binary ────────────────────────────────────────────────────────
 
-ASSET="dot-${os}-${arch}.tar.gz"
+ASSET="dot-${os}-${arch}"
 URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
 
 echo "Installing dot..."
@@ -39,15 +39,13 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 if command -v curl >/dev/null 2>&1; then
-  curl -fsSL "$URL" -o "$TMP/$ASSET"
+  curl -fsSL "$URL" -o "$TMP/dot"
 elif command -v wget >/dev/null 2>&1; then
-  wget -qO "$TMP/$ASSET" "$URL"
+  wget -qO "$TMP/dot" "$URL"
 else
   echo "error: curl or wget is required" >&2
   exit 1
 fi
-
-tar -xzf "$TMP/$ASSET" -C "$TMP"
 
 # ── 3. Install binary ─────────────────────────────────────────────────────────
 
@@ -74,8 +72,10 @@ setup_shell_integration() {
   # Write PATH export into integration file (idempotent)
   if ! grep -qF "$PATH_MARKER" "$integ_file" 2>/dev/null; then
     if [ "$shell_name" = "fish" ]; then
+      # shellcheck disable=SC2016
       printf '\n%s\nset -gx PATH %s $PATH\n' "$PATH_MARKER" "$BIN_DIR" >> "$integ_file"
     else
+      # shellcheck disable=SC2016
       printf '\n%s\nexport PATH="%s:$PATH"\n' "$PATH_MARKER" "$BIN_DIR" >> "$integ_file"
     fi
   fi
