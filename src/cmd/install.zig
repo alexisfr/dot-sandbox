@@ -244,6 +244,8 @@ fn installTool(
     if (!force) {
         if (state.getVersion(tool.id)) |installed_ver| {
             if (std.mem.eql(u8, installed_ver, version)) {
+                // Still regenerate the shell section in case the integration file was lost.
+                _ = writeShellIntegration(&tool, allocator);
                 printAlreadyReady(tool.name, installed_ver);
                 return;
             }
@@ -371,44 +373,36 @@ fn installTool(
     }
 }
 
-/// Write shell completions and aliases for a tool. Returns true if anything was written.
-/// Wrap a completion command in a shell-appropriate existence guard so that
-/// sourcing the integration file silently skips missing binaries.
 fn guardedCompletion(sh: platform.Shell, id: []const u8, cmd: []const u8, allocator: std.mem.Allocator) ![]u8 {
     return switch (sh) {
         .fish => std.fmt.allocPrint(allocator, "if command -q {s}\n    {s}\nend", .{ id, cmd }),
         .bash, .zsh => std.fmt.allocPrint(allocator, "command -v {s} >/dev/null 2>&1 && {s}", .{ id, cmd }),
-        // Currently unreachable: writeShellIntegration returns early for .unknown
         .unknown => allocator.dupe(u8, cmd),
     };
 }
 
-fn writeShellIntegration(t: *const tool_mod.Tool, allocator: std.mem.Allocator) bool {
-    const shell_type = platform.Shell.detect();
-    if (shell_type == .unknown) return false;
-
+/// Build the shell section content for a tool (completions + aliases + delegation).
+/// Returns an allocated string, or null if there is nothing to write for this shell.
+/// Caller owns the returned slice.
+pub fn buildShellSection(t: *const tool_mod.Tool, shell_type: platform.Shell, allocator: std.mem.Allocator) ?[]u8 {
     var section: std.ArrayList(u8) = .empty;
     defer section.deinit(allocator);
 
     if (t.shell_completions) |completions| {
         if (completions.forShell(shell_type)) |comp_cmd| {
-            const guarded = guardedCompletion(shell_type, t.id, comp_cmd, allocator) catch return false;
+            const guarded = guardedCompletion(shell_type, t.id, comp_cmd, allocator) catch return null;
             defer allocator.free(guarded);
-            section.appendSlice(allocator, guarded) catch return false;
+            section.appendSlice(allocator, guarded) catch return null;
         }
     }
 
     for (t.aliases) |alias_name| {
-        if (section.items.len > 0) section.append(allocator, '\n') catch return false;
-        const alias_line = std.fmt.allocPrint(allocator, "alias {s}={s}", .{ alias_name, t.id }) catch return false;
+        if (section.items.len > 0) section.append(allocator, '\n') catch return null;
+        const alias_line = std.fmt.allocPrint(allocator, "alias {s}={s}", .{ alias_name, t.id }) catch return null;
         defer allocator.free(alias_line);
-        section.appendSlice(allocator, alias_line) catch return false;
+        section.appendSlice(allocator, alias_line) catch return null;
 
-        // Delegate completions to the original command so tab-completion works with the alias.
-        // Fish: `complete -c <alias> -w <id>` inherits all completions via --wraps.
-        // Zsh:  `compdef <alias>=<id>` delegates the completion function.
-        // Bash: the generated completion function name (e.g. __start_kubectl) isn't predictable
-        //       enough for a generic solution, so bash users get the alias but not the completions.
+        // Delegate completions to the original command so tab-complete works on the alias.
         const comp_delegation: ?[]const u8 = switch (shell_type) {
             .fish => std.fmt.allocPrint(allocator, "\ncomplete -c {s} -w {s}", .{ alias_name, t.id }) catch null,
             .zsh => if (t.shell_completions != null and t.shell_completions.?.zsh_cmd != null)
@@ -423,10 +417,17 @@ fn writeShellIntegration(t: *const tool_mod.Tool, allocator: std.mem.Allocator) 
         }
     }
 
-    if (section.items.len == 0) return false;
+    if (section.items.len == 0) return null;
+    return section.toOwnedSlice(allocator) catch null;
+}
 
+fn writeShellIntegration(t: *const tool_mod.Tool, allocator: std.mem.Allocator) bool {
+    const shell_type = platform.Shell.detect();
+    if (shell_type == .unknown) return false;
+    const section = buildShellSection(t, shell_type, allocator) orelse return false;
+    defer allocator.free(section);
     shell_mod.ensureSourced(shell_type, allocator) catch {};
-    shell_mod.addSection(shell_type, t.id, section.items, allocator) catch {};
+    shell_mod.addSection(shell_type, t.id, section, allocator) catch {};
     output.printStep("Shell", output.sym_ok, shell_type.name());
     return true;
 }

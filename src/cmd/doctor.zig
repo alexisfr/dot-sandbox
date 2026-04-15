@@ -4,6 +4,7 @@ const tool_mod = @import("../tool.zig");
 const platform = @import("../platform.zig");
 const output = @import("../ui/output.zig");
 const shell_mod = @import("../shell.zig");
+const install_mod = @import("install.zig");
 
 const help =
     \\Usage: dot doctor
@@ -276,16 +277,53 @@ pub fn run(
                 shell_mod.ensureSourced(check_sh, allocator) catch {};
 
                 if (!had_file) {
-                    printCheckWarn(check_sh.name(), "integration file missing — recreated (run: dot install --force to restore tool sections)");
+                    printCheckWarn(check_sh.name(), "integration file missing — recreated");
                     warn += 1;
                 }
                 if (!had_source) {
-                    printCheckWarn(check_sh.name(), "RC source block missing — added (restart your shell or source your RC)");
+                    printCheckWarn(check_sh.name(), "source block missing — added to RC (restart your shell)");
                     warn += 1;
                 }
-                // A freshly recreated file is empty — no unguarded invocations possible.
-                if (!had_file) continue;
             }
+
+            // Detect and restore any missing tool sections in the integration file.
+            {
+                const integ_file_r = std.fs.cwd().openFile(integ_path, .{}) catch null;
+                const integ_content: ?[]u8 = if (integ_file_r) |f| blk: {
+                    defer f.close();
+                    var ibuf: [4096]u8 = undefined;
+                    var ireader = f.readerStreaming(&ibuf);
+                    break :blk ireader.interface.allocRemaining(allocator, .limited(4 * 1024 * 1024)) catch null;
+                } else null;
+                defer if (integ_content) |c| allocator.free(c);
+
+                var restored: usize = 0;
+                for (tools) |*t| {
+                    if (!state.isInstalled(t.id)) continue;
+                    // Skip if section already present in the file
+                    if (integ_content) |c| {
+                        const sec = extractSection(c, t.id, allocator);
+                        if (sec != null) {
+                            allocator.free(sec.?);
+                            continue;
+                        }
+                    }
+                    // Section missing — regenerate it silently
+                    const section = install_mod.buildShellSection(t, check_sh, allocator) orelse continue;
+                    defer allocator.free(section);
+                    shell_mod.addSection(check_sh, t.id, section, allocator) catch {};
+                    restored += 1;
+                }
+                if (restored > 0) {
+                    const detail = std.fmt.allocPrint(allocator, "{d} tool section(s) restored", .{restored}) catch null;
+                    defer if (detail) |d| allocator.free(d);
+                    printCheckWarn(check_sh.name(), detail orelse "tool sections restored");
+                    warn += 1;
+                }
+            }
+
+            // A freshly recreated file has no unguarded invocations to scan.
+            if (!had_file) continue;
         }
 
         // Read integration file for unguarded invocation scan.
