@@ -1,8 +1,8 @@
 const std = @import("std");
 const platform = @import("platform.zig");
 
-const source_marker = "# SOURCE SHELL INTEGRATION";
-const path_marker = "# ADD LOCAL BIN TO PATH";
+const source_marker = "# dot: source shell integration";
+const path_marker = "# dot: add local bin to PATH";
 
 /// Ensure the centralized integration file is sourced from the shell's RC.
 /// Idempotent.
@@ -24,7 +24,7 @@ pub fn ensureSourced(shell: platform.Shell, allocator: std.mem.Allocator) !void 
     defer allocator.free(integration_path);
 
     // Ensure integration file exists (open without truncating; create only if absent)
-    const integ_dir = std.fs.path.dirname(integration_path).?;
+    const integ_dir = std.fs.path.dirname(integration_path) orelse return error.InvalidIntegrationPath;
     try std.fs.cwd().makePath(integ_dir);
     const integ_file = std.fs.cwd().openFile(integration_path, .{}) catch |e| switch (e) {
         error.FileNotFound => try std.fs.cwd().createFile(integration_path, .{}),

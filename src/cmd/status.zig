@@ -128,7 +128,7 @@ pub fn run(
     std.mem.sort([]const u8, keys[0..key_count], {}, cmp.lt);
 
     for (keys[0..key_count]) |key| {
-        const tool_entry = state.tools.get(key).?;
+        const tool_entry = state.tools.get(key) orelse continue;
         var date_buf: [24]u8 = undefined;
         const date = formatTimestamp(tool_entry.installed_at, &date_buf);
         printStatusRow(key, tool_entry.version, date, tool_entry.method);
