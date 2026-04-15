@@ -5,6 +5,11 @@ pub const Error = error{
     InvalidUrl,
 };
 
+/// HTTP status code from the most recent failed request (set before returning HttpError).
+pub var last_status: u16 = 0;
+/// URL of the most recent failed request (points into caller memory; valid until next call).
+pub var last_url: []const u8 = "";
+
 /// Callback for download progress. context is passed back as-is to func.
 pub const ProgressCallback = struct {
     context: *anyopaque,
@@ -29,7 +34,11 @@ pub fn get(allocator: std.mem.Allocator, url: []const u8) ![]u8 {
     });
 
     const code = @intFromEnum(result.status);
-    if (code < 200 or code >= 300) return error.HttpError;
+    if (code < 200 or code >= 300) {
+        last_status = @intCast(code);
+        last_url = url;
+        return error.HttpError;
+    }
 
     return alloc_writer.toOwnedSlice();
 }
@@ -70,7 +79,11 @@ pub fn download(
     var response = try req.receiveHead(&redirect_buf);
 
     const code = @intFromEnum(response.head.status);
-    if (code < 200 or code >= 300) return error.HttpError;
+    if (code < 200 or code >= 300) {
+        last_status = @intCast(code);
+        last_url = url;
+        return error.HttpError;
+    }
 
     const content_length: ?u64 = response.head.content_length;
 

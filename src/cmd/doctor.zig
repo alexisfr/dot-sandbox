@@ -14,6 +14,7 @@ const help =
     \\  • Detected shell and package manager
     \\  • Installed tool binaries and their locations
     \\  • Orphaned state entries (tools no longer in any repository)
+    \\  • Unmanaged binaries in ~/.local/bin not registered with dot
     \\  • Shell integration file status and unguarded invocations
     \\
     \\Options:
@@ -253,6 +254,26 @@ pub fn run(
     }
     if (!has_orphan) {
         printCheckPass("All state entries", "present in repository");
+        pass += 1;
+    }
+
+    // Unmanaged tools: binaries present in ~/.local/bin but not registered in state.
+    printDoctorSection("Unmanaged Tools");
+
+    var unmanaged_count: usize = 0;
+    for (tools) |t| {
+        if (state.isInstalled(t.id)) continue;
+        const bin_path = std.fs.path.join(allocator, &.{ home, ".local", "bin", t.id }) catch continue;
+        defer allocator.free(bin_path);
+        std.fs.cwd().access(bin_path, .{}) catch continue;
+        const detail = std.fmt.allocPrint(allocator, "found in ~/.local/bin — run: dot install {s}", .{t.id}) catch null;
+        defer if (detail) |d| allocator.free(d);
+        printCheckWarn(t.id, detail orelse "found in ~/.local/bin but not managed by dot");
+        warn += 1;
+        unmanaged_count += 1;
+    }
+    if (unmanaged_count == 0) {
+        printCheckPass("Unmanaged binaries", "none found");
         pass += 1;
     }
 

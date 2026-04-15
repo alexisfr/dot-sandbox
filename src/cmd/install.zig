@@ -265,7 +265,7 @@ fn installTool(
             brewInstall(allocator, formula, force) catch |e| {
                 output.printStep("Brew", output.sym_fail, @errorName(e));
                 output.printError("brew install failed");
-                return e;
+                return error.CommandFailed;
             };
             output.printStep("Brew", output.sym_ok, formula);
             used_brew = true;
@@ -298,9 +298,17 @@ fn installTool(
 
         tool.strategy.execute(&ctx) catch |e| {
             bar.finish();
-            output.printStep("Installation", output.sym_fail, @errorName(e));
+            var status_buf: [32]u8 = undefined;
+            const hint: []const u8 = switch (http.last_status) {
+                404 => "release asset not found — tool may not support your platform",
+                403 => "access denied — repository may be private",
+                0 => @errorName(e),
+                else => std.fmt.bufPrint(&status_buf, "HTTP {d}", .{http.last_status}) catch @errorName(e),
+            };
+            output.printStep("Installation", output.sym_fail, hint);
+            if (http.last_url.len > 0) output.printFmt("  URL: {s}\n", .{http.last_url});
             output.printError("Installation failed");
-            return e;
+            return error.CommandFailed;
         };
         bar.finish();
         output.printStep("Installation", output.sym_ok, bin_dir);

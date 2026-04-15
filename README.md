@@ -51,16 +51,17 @@ dot doctor                  # health check
 
 ## Groups
 
-| Group | Tools |
-|---|---|
-| `k8s` | helm, kubectl, k9s, kubelogin |
-| `iac` | terraform, opentofu, vault, tflint, terraform-docs, hcledit, terragrunt |
-| `config` | ansible, gh |
-| `cloud` | aws, gcloud, oci |
-| `containers` | podman |
-| `utils` | jq, yq, btop |
-| `terminal` | starship |
-| `all` | everything above |
+| Group        | Tools                                                            |
+| ------------ | ---------------------------------------------------------------- |
+| `k8s`        | helm, kubectl, k9s, kubelogin                                    |
+| `iac`        | terraform, opentofu, tflint, terraform-docs, hcledit, terragrunt |
+| `config`     | ansible, gh                                                      |
+| `cloud`      | aws, gcloud, oci                                                 |
+| `containers` | podman                                                           |
+| `utils`      | jq, yq, btop                                                     |
+| `terminal`   | starship                                                         |
+| `security`   | vault, trivy                                                     |
+| `all`        | everything above                                                 |
 
 ## Shell integration
 

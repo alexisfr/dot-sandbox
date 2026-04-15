@@ -1,6 +1,5 @@
 const std = @import("std");
 const http = @import("../http.zig");
-const archive = @import("../archive.zig");
 const platform = @import("../platform.zig");
 const output = @import("../ui/output.zig");
 const state_mod = @import("../state.zig");
@@ -79,48 +78,15 @@ pub fn run(
     const os_type = platform.OperatingSystem.current();
     const arch_type = platform.Arch.current();
 
+    // Asset is a plain binary named dot-{os}-{arch} (e.g. dot-linux-amd64).
     const url = try std.fmt.allocPrint(
         allocator,
-        "https://github.com/{s}/releases/download/v{s}/dot-{s}-{s}.tar.gz",
+        "https://github.com/{s}/releases/download/v{s}/dot-{s}-{s}",
         .{ version_mod.github_repo, latest, os_type.name(), arch_type.goName() },
     );
     defer allocator.free(url);
 
-    const tmp_dir = try std.fmt.allocPrint(allocator, "/tmp/dot-update-{s}", .{latest});
-    defer allocator.free(tmp_dir);
-    std.fs.cwd().makePath(tmp_dir) catch {};
-    defer std.fs.cwd().deleteTree(tmp_dir) catch {};
-
-    const filename = std.fs.path.basename(url);
-    const archive_path = try std.fs.path.join(allocator, &.{ tmp_dir, filename });
-    defer allocator.free(archive_path);
-
-    // Download
-    var bar = progress_mod.ProgressBar{ .step = "Downloading" };
-    const progress = http.ProgressCallback{ .context = &bar, .func = progressCbFn };
-
-    output.printDownloading(url);
-    http.download(allocator, url, archive_path, progress) catch |e| {
-        bar.finish();
-        output.printStep("Download", output.sym_fail, @errorName(e));
-        output.printError("Download failed");
-        return e;
-    };
-    bar.finish();
-
-    // Extract
-    const extract_dir = try std.fmt.allocPrint(allocator, "{s}/extract", .{tmp_dir});
-    defer allocator.free(extract_dir);
-
-    output.printStepStart("Extracting", filename);
-    archive.extractTarGz(archive_path, extract_dir, 0) catch |e| {
-        output.printStep("Extracting", output.sym_fail, @errorName(e));
-        output.printError("Extraction failed");
-        return e;
-    };
-    output.printStepDone("Extracting", filename);
-
-    // Atomic install: write to .new, chmod, rename into place
+    // Install path
     const home = std.posix.getenv("HOME") orelse "/tmp";
     const bin_dir = try std.fs.path.join(allocator, &.{ home, ".local", "bin" });
     defer allocator.free(bin_dir);
@@ -131,15 +97,27 @@ pub fn run(
     const tmp_dest = try std.fmt.allocPrint(allocator, "{s}.new", .{dest});
     defer allocator.free(tmp_dest);
 
-    const src_bin = try std.fs.path.join(allocator, &.{ extract_dir, "dot" });
-    defer allocator.free(src_bin);
+    // Download directly to a sibling .new file, then rename atomically.
+    var bar = progress_mod.ProgressBar{ .step = "Downloading" };
+    const progress = http.ProgressCallback{ .context = &bar, .func = progressCbFn };
 
-    std.fs.cwd().copyFile(src_bin, std.fs.cwd(), tmp_dest, .{}) catch |e| {
-        output.printStep("Install", output.sym_fail, @errorName(e));
-        output.printError("Could not write binary");
-        return e;
+    http.download(allocator, url, tmp_dest, progress) catch |e| {
+        bar.finish();
+        var status_buf: [32]u8 = undefined;
+        const hint: []const u8 = switch (http.last_status) {
+            404 => "release asset not found — the binary may not exist for your platform yet",
+            403 => "access denied — repository may be private",
+            0 => @errorName(e),
+            else => std.fmt.bufPrint(&status_buf, "HTTP {d}", .{http.last_status}) catch @errorName(e),
+        };
+        output.printStep("Download", output.sym_fail, hint);
+        output.printFmt("  URL: {s}\n", .{url});
+        output.printError("Update failed");
+        return error.CommandFailed;
     };
+    bar.finish();
 
+    // Make executable and atomically replace the running binary.
     const chmod = try std.process.Child.run(.{
         .allocator = allocator,
         .argv = &.{ "chmod", "+x", tmp_dest },
@@ -150,7 +128,7 @@ pub fn run(
     std.fs.rename(std.fs.cwd(), tmp_dest, std.fs.cwd(), dest) catch |e| {
         output.printStep("Install", output.sym_fail, @errorName(e));
         output.printError("Could not replace binary");
-        return e;
+        return error.CommandFailed;
     };
 
     output.printStep("Installed", output.sym_ok, dest);

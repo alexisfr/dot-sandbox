@@ -9,7 +9,12 @@ pub fn main() !void {
     const argv = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, argv);
 
-    try cli.run(allocator, argv);
+    cli.run(allocator, argv) catch |e| switch (e) {
+        // CommandFailed means the command already printed its own error message.
+        // Exit with code 1 without printing anything — avoids the double "error: Foo" line.
+        error.CommandFailed => std.process.exit(1),
+        else => return e,
+    };
 }
 
 // Pull in all tests from submodules

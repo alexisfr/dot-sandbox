@@ -19,6 +19,14 @@ pub const OperatingSystem = enum {
         };
     }
 
+    /// Title-cased OS name, e.g. "Linux", "Darwin" — used by tools like trivy.
+    pub fn titleName(self: OperatingSystem) []const u8 {
+        return switch (self) {
+            .linux => "Linux",
+            .macos => "macOS",
+        };
+    }
+
     pub fn goName(self: OperatingSystem) []const u8 {
         return switch (self) {
             .linux => "linux-amd64",

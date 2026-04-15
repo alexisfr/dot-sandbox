@@ -226,7 +226,7 @@
             "name": "Vault",
             "description": "Secrets management tool by HashiCorp",
             "groups": [
-                "iac"
+                "security"
             ],
             "homepage": "https://www.vaultproject.io",
             "brew_formula": "hashicorp/tap/vault",
@@ -523,6 +523,31 @@
                 "bash_cmd": "eval \"$(starship init bash)\"",
                 "zsh_cmd": "eval \"$(starship init zsh)\"",
                 "fish_cmd": "starship init fish | source"
+            }
+        },
+        {
+            "id": "trivy",
+            "name": "Trivy",
+            "description": "Comprehensive security scanner for containers, filesystems, and IaC",
+            "groups": [
+                "security"
+            ],
+            "homepage": "https://trivy.dev",
+            "brew_formula": "trivy",
+            "version_source": {
+                "type": "github_release",
+                "repo": "aquasecurity/trivy",
+                "strip_prefix": "v"
+            },
+            "strategy": {
+                "type": "github_release",
+                "url_template": "https://github.com/aquasecurity/trivy/releases/download/v{version}/trivy_{version}_{os_title}-64bit.tar.gz",
+                "binary_in_archive": "trivy"
+            },
+            "shell_completions": {
+                "bash_cmd": "source <(trivy completion bash)",
+                "zsh_cmd": "source <(trivy completion zsh)",
+                "fish_cmd": "trivy completion fish | source"
             }
         }
     ]

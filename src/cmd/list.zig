@@ -13,7 +13,7 @@ const help =
     \\  --group, -g <g>   Show only tools in the given group
     \\  --help, -h        Show this help
     \\
-    \\Groups:  k8s, cloud, iac, containers, utils, terminal, config, all
+    \\Groups:  k8s, cloud, iac, containers, utils, terminal, config, security, all
     \\
     \\Examples:
     \\  dot list
@@ -69,6 +69,8 @@ pub fn run(
 
     printListHeader(term_width);
 
+    const home = std.posix.getenv("HOME") orelse "";
+
     // Collect matching tools, then sort by first group name (alphabetical), then by id.
     var matched: std.ArrayList(*const tool_mod.Tool) = .empty;
     defer matched.deinit(allocator);
@@ -84,12 +86,21 @@ pub fn run(
     }
 
     const cmp = struct {
+        fn ltName(a: []const u8, b: []const u8) bool {
+            const len = @min(a.len, b.len);
+            for (0..len) |i| {
+                const ca = std.ascii.toLower(a[i]);
+                const cb = std.ascii.toLower(b[i]);
+                if (ca != cb) return ca < cb;
+            }
+            return a.len < b.len;
+        }
         fn lt(_: void, a: *const tool_mod.Tool, b: *const tool_mod.Tool) bool {
             const ga = if (a.groups.len > 0) @tagName(a.groups[0]) else "";
             const gb = if (b.groups.len > 0) @tagName(b.groups[0]) else "";
             const gcmp = std.mem.order(u8, ga, gb);
             if (gcmp != .eq) return gcmp == .lt;
-            return std.mem.lessThan(u8, a.id, b.id);
+            return ltName(a.name, b.name);
         }
     };
     std.mem.sort(*const tool_mod.Tool, matched.items, {}, cmp.lt);
@@ -105,7 +116,8 @@ pub fn run(
         const maybe_entry = state.tools.get(t.id);
         const version: ?[]const u8 = if (maybe_entry) |e| e.version else null;
         const sys = if (version == null) isSystemInstalled(allocator, t.id) else false;
-        printListRow(t.id, t.aliases, t.description, version, sys, groups_writer.buffered(), desc_width);
+        const unmanaged = if (version == null and !sys) isUnmanagedLocal(home, t.id, allocator) else false;
+        printListRow(t.id, t.aliases, t.description, version, sys, unmanaged, groups_writer.buffered(), desc_width);
     }
 
     const filter_name: ?[]const u8 = if (group_filter) |gf| @tagName(gf) else null;
@@ -139,6 +151,14 @@ fn truncDesc(desc: []const u8, max_visual: usize, buf: []u8) struct { str: []con
     return .{ .str = buf[0 .. cut + 3], .visual = cut + 1 };
 }
 
+/// Returns true if ~/.local/bin/<id> exists but is not registered in dot's state.
+fn isUnmanagedLocal(home: []const u8, id: []const u8, allocator: std.mem.Allocator) bool {
+    const path = std.fs.path.join(allocator, &.{ home, ".local", "bin", id }) catch return false;
+    defer allocator.free(path);
+    std.fs.cwd().access(path, .{}) catch return false;
+    return true;
+}
+
 /// Returns true if the tool binary is found in PATH outside ~/.local/bin.
 fn isSystemInstalled(allocator: std.mem.Allocator, id: []const u8) bool {
     const result = std.process.Child.run(.{
@@ -152,7 +172,7 @@ fn isSystemInstalled(allocator: std.mem.Allocator, id: []const u8) bool {
     return path.len > 0 and !std.mem.containsAtLeast(u8, path, 1, ".local/bin");
 }
 
-fn printListRow(id: []const u8, aliases: []const []const u8, desc: []const u8, version: ?[]const u8, sys: bool, groups: []const u8, desc_width: usize) void {
+fn printListRow(id: []const u8, aliases: []const []const u8, desc: []const u8, version: ?[]const u8, sys: bool, unmanaged: bool, groups: []const u8, desc_width: usize) void {
     // id column: "kubectl" or "kubectl (k)" dimmed, padded to col_id visual chars
     const id_trunc = id[0..@min(id.len, col_id)];
     if (aliases.len > 0) {
@@ -192,6 +212,9 @@ fn printListRow(id: []const u8, aliases: []const []const u8, desc: []const u8, v
         std.debug.print("{s}{s} system{s}", .{ output.yellow, output.sym_warn, output.reset });
         for (0..pad) |_| std.debug.print(" ", .{});
         std.debug.print(" ", .{});
+    } else if (unmanaged) {
+        // "~ local" = 7 visual chars; pad to 14 then add separator space
+        std.debug.print("{s}~ local{s}       ", .{ output.dim, output.reset });
     } else {
         std.debug.print("{s}not installed{s}  ", .{ output.dim, output.reset });
     }
@@ -256,5 +279,6 @@ fn parseGroup(name: []const u8) ?tool_mod.Group {
     if (std.mem.eql(u8, name, "utils")) return .utils;
     if (std.mem.eql(u8, name, "terminal")) return .terminal;
     if (std.mem.eql(u8, name, "config")) return .config;
+    if (std.mem.eql(u8, name, "security")) return .security;
     return null;
 }
