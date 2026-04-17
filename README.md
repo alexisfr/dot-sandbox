@@ -58,7 +58,7 @@ dot doctor                  # health check
 | `config`     | ansible, gh                                                      |
 | `cloud`      | aws, gcloud, oci                                                 |
 | `containers` | podman                                                           |
-| `utils`      | jq, yq, btop                                                     |
+| `utils`      | jq, yq, btop, tldr                                               |
 | `terminal`   | starship                                                         |
 | `security`   | vault, trivy                                                     |
 | `all`        | everything above                                                 |

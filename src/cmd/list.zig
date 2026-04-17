@@ -213,8 +213,8 @@ fn printListRow(id: []const u8, aliases: []const []const u8, desc: []const u8, v
         for (0..pad) |_| std.debug.print(" ", .{});
         std.debug.print(" ", .{});
     } else if (unmanaged) {
-        // "~ local" = 7 visual chars; pad to 14 then add separator space
-        std.debug.print("{s}~ local{s}       ", .{ output.dim, output.reset });
+        // "~ local" = 7 visual chars; 14 - 7 = 7 padding + 1 separator = 8 spaces
+        std.debug.print("{s}~ local{s}        ", .{ output.dim, output.reset });
     } else {
         std.debug.print("{s}not installed{s}  ", .{ output.dim, output.reset });
     }

@@ -341,6 +341,30 @@
             }
         },
         {
+            "id": "tldr",
+            "name": "tldr",
+            "description": "Simplified, community-driven man pages for command-line tools",
+            "groups": [
+                "utils"
+            ],
+            "homepage": "https://tldr.sh",
+            "brew_formula": "tealdeer",
+            "version_source": {
+                "type": "github_release",
+                "repo": "dbrgn/tealdeer",
+                "strip_prefix": "v"
+            },
+            "strategy": {
+                "type": "direct_binary",
+                "url_template": "https://github.com/dbrgn/tealdeer/releases/download/v{version}/tealdeer-linux-{arch_uname}-musl"
+            },
+            "shell_completions": {
+                "bash_cmd": "source <(tldr --generate-completion bash)",
+                "zsh_cmd": "source <(tldr --generate-completion zsh)",
+                "fish_cmd": "tldr --generate-completion fish | source"
+            }
+        },
+        {
             "id": "jq",
             "name": "jq",
             "description": "Lightweight and flexible command-line JSON processor",

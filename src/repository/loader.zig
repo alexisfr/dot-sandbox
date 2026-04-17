@@ -606,5 +606,5 @@ test "builtin_repo_bytes: parses all 19 built-in tools" {
     var arena_inst = std.heap.ArenaAllocator.init(alloc);
     defer arena_inst.deinit();
     const tools = try parseRepositoryJson(arena_inst.allocator(), alloc, builtin_repo_bytes);
-    try std.testing.expectEqual(@as(usize, 23), tools.len);
+    try std.testing.expectEqual(@as(usize, 24), tools.len);
 }

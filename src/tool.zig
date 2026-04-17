@@ -398,25 +398,42 @@ pub const InstallStrategy = union(enum) {
             defer ctx.allocator.free(install_dir);
 
             // Create venv
+            output.printStepStart("Venv", install_dir);
             const venv_result = try std.process.Child.run(.{
                 .allocator = ctx.allocator,
                 .argv = &.{ "python3", "-m", "venv", install_dir },
+                .max_output_bytes = 64 * 1024,
             });
             defer ctx.allocator.free(venv_result.stdout);
             defer ctx.allocator.free(venv_result.stderr);
-            if (venv_result.term.Exited != 0) return error.VenvCreationFailed;
+            if (venv_result.term.Exited != 0) {
+                output.printStepDone("Venv", "failed");
+                const msg = std.mem.trim(u8, venv_result.stderr, " \n\r\t");
+                if (msg.len > 0) output.printDetail(msg);
+                output.printDetail("Ensure python3 and the venv module are installed (e.g. python3-venv on Debian/Ubuntu, python3 on AlmaLinux/RHEL)");
+                return error.VenvCreationFailed;
+            }
+            output.printStepDone("Venv", install_dir);
 
             // pip install
             const pip = try std.fs.path.join(ctx.allocator, &.{ install_dir, "bin", "pip" });
             defer ctx.allocator.free(pip);
 
+            output.printStepStart("pip install", self.package);
             const pip_result = try std.process.Child.run(.{
                 .allocator = ctx.allocator,
                 .argv = &.{ pip, "install", "--upgrade", self.package },
+                .max_output_bytes = 256 * 1024,
             });
             defer ctx.allocator.free(pip_result.stdout);
             defer ctx.allocator.free(pip_result.stderr);
-            if (pip_result.term.Exited != 0) return error.PipInstallFailed;
+            if (pip_result.term.Exited != 0) {
+                output.printStepDone("pip install", "failed");
+                const msg = std.mem.trim(u8, pip_result.stderr, " \n\r\t");
+                if (msg.len > 0) output.printDetail(msg);
+                return error.PipInstallFailed;
+            }
+            output.printStepDone("pip install", self.package);
 
             std.fs.cwd().makePath(ctx.bin_dir) catch {};
 

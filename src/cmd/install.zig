@@ -28,6 +28,9 @@ pub fn parseInstallArgs(args: []const []const u8) InstallArgs {
         const arg = args[idx];
         if (std.mem.eql(u8, arg, "--force")) {
             result.force = true;
+        } else if (std.mem.eql(u8, arg, "--version") or std.mem.eql(u8, arg, "-v")) {
+            idx += 1;
+            if (idx < args.len) result.version_arg = args[idx];
         } else if (std.mem.eql(u8, arg, "--group") or std.mem.eql(u8, arg, "-g")) {
             result.group_mode = true;
             idx += 1;
@@ -48,13 +51,13 @@ const help =
     \\Install a tool from the repository.
     \\
     \\Arguments:
-    \\  <tool>         Tool ID to install (e.g. helm, kubectl)
-    \\  [version]      Pin to a specific version (e.g. 1.8.0)
+    \\  <tool>              Tool ID to install (e.g. helm, kubectl)
     \\
     \\Options:
-    \\  --group, -g    Install all tools in a group
-    \\  --force        Force reinstall, even if already installed
-    \\  --help, -h     Show this help
+    \\  --version, -v <v>   Pin to a specific version (e.g. 1.8.0)
+    \\  --group, -g <g>     Install all tools in a group
+    \\  --force             Force reinstall, even if already installed
+    \\  --help, -h          Show this help
     \\
     \\Pinning:
     \\  Specifying a version pins the tool — it will be skipped by
@@ -62,7 +65,7 @@ const help =
     \\
     \\Examples:
     \\  dot install helm
-    \\  dot install terraform 1.8.0
+    \\  dot install terraform --version 1.8.0
     \\  dot install --group k8s
     \\  dot install helm --force
     \\
@@ -235,7 +238,7 @@ fn installTool(
     if (!force and !state.isInstalled(tool.id)) {
         if (checkSystemInstall(allocator, tool.id)) |sys_path| {
             defer allocator.free(sys_path);
-            printSkipSystem(tool.name, sys_path, "unknown", version);
+            printSkipSystem(tool.name, tool.id, sys_path, "unknown", version);
             return;
         }
     }
@@ -463,26 +466,20 @@ fn checkSystemInstall(allocator: std.mem.Allocator, id: []const u8) ?[]u8 {
     const our_path = std.fs.path.join(allocator, &.{ home, ".local", "bin", id }) catch return null;
     defer allocator.free(our_path);
 
-    const cmd_str = std.fmt.allocPrint(allocator, "type -aP {s} 2>/dev/null | head -5", .{id}) catch return null;
-    defer allocator.free(cmd_str);
-
     const result = std.process.Child.run(.{
         .allocator = allocator,
-        .argv = &.{ "sh", "-c", cmd_str },
+        .argv = &.{ "which", id },
+        .max_output_bytes = 512,
     }) catch return null;
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
 
-    if (result.term.Exited != 0) return null;
+    if (result.term != .Exited or result.term.Exited != 0) return null;
 
-    var lines = std.mem.splitScalar(u8, std.mem.trim(u8, result.stdout, "\n"), '\n');
-    while (lines.next()) |line| {
-        const path = std.mem.trim(u8, line, " \r");
-        if (path.len == 0) continue;
-        if (std.mem.eql(u8, path, our_path)) continue;
-        return allocator.dupe(u8, path) catch null;
-    }
-    return null;
+    const path = std.mem.trim(u8, result.stdout, " \n\r\t");
+    if (path.len == 0) return null;
+    if (std.mem.eql(u8, path, our_path)) return null;
+    return allocator.dupe(u8, path) catch null;
 }
 
 pub fn parseGroup(name: []const u8) ?tool_mod.Group {
@@ -492,6 +489,8 @@ pub fn parseGroup(name: []const u8) ?tool_mod.Group {
     if (std.mem.eql(u8, name, "containers")) return .containers;
     if (std.mem.eql(u8, name, "utils")) return .utils;
     if (std.mem.eql(u8, name, "terminal")) return .terminal;
+    if (std.mem.eql(u8, name, "config")) return .config;
+    if (std.mem.eql(u8, name, "security")) return .security;
     return null;
 }
 
@@ -540,14 +539,14 @@ fn printResources(items: []const []const u8) void {
     }
 }
 
-fn printSkipSystem(tool: []const u8, path: []const u8, sys_ver: []const u8, latest: []const u8) void {
+fn printSkipSystem(tool_name: []const u8, tool_id: []const u8, path: []const u8, sys_ver: []const u8, latest: []const u8) void {
     std.debug.print("\n{s}{s}{s}  {s}{s}{s} detected via system package manager\n\n", .{
-        output.yellow, output.sym_warn, output.reset, output.bold, tool, output.reset,
+        output.yellow, output.sym_warn, output.reset, output.bold, tool_name, output.reset,
     });
     std.debug.print("  Location: {s}\n", .{path});
     std.debug.print("  Version:  {s}\n", .{sys_ver});
     std.debug.print("  Latest:   {s}\n", .{latest});
-    std.debug.print("\n  To install dot's version, run: dot install {s} --force\n\n", .{tool});
+    std.debug.print("\n  To install dot's version, run: dot install {s} --force\n\n", .{tool_id});
 }
 
 fn printFetchingVersion(name: []const u8) void {
@@ -560,7 +559,7 @@ fn printVersionFetchWarning(err_name: []const u8) void {
 
 fn printUnknownGroup(name: []const u8) void {
     std.debug.print("{s}Error:{s} unknown group '{s}'\n", .{ output.red, output.reset, name });
-    std.debug.print("Available groups: k8s, cloud, iac, containers, utils, terminal, all\n", .{});
+    std.debug.print("Available groups: k8s, cloud, iac, containers, utils, terminal, config, security, all\n", .{});
 }
 
 fn printGroupToolError(id: []const u8, err: anyerror) void {
@@ -647,6 +646,18 @@ test "parseInstallArgs: tool name with version" {
     const args = parseInstallArgs(&.{ "helm", "3.15.0" });
     try std.testing.expectEqualStrings("helm", args.tool_name);
     try std.testing.expectEqualStrings("3.15.0", args.version_arg.?);
+}
+
+test "parseInstallArgs: --version flag" {
+    const args = parseInstallArgs(&.{ "terraform", "--version", "1.8.0" });
+    try std.testing.expectEqualStrings("terraform", args.tool_name);
+    try std.testing.expectEqualStrings("1.8.0", args.version_arg.?);
+}
+
+test "parseInstallArgs: -v shorthand" {
+    const args = parseInstallArgs(&.{ "terraform", "-v", "1.8.0" });
+    try std.testing.expectEqualStrings("terraform", args.tool_name);
+    try std.testing.expectEqualStrings("1.8.0", args.version_arg.?);
 }
 
 test "parseInstallArgs: --force flag" {
