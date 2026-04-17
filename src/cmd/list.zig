@@ -13,7 +13,7 @@ const help =
     \\  --group, -g <g>   Show only tools in the given group
     \\  --help, -h        Show this help
     \\
-    \\Groups:  k8s, cloud, iac, containers, utils, terminal, config, security, all
+    \\Groups:  k8s, cloud, iac, containers, utils, terminal, cm, security, all
     \\
     \\Examples:
     \\  dot list
@@ -267,7 +267,7 @@ test "parseGroup" {
     try std.testing.expectEqual(@as(?tool_mod.Group, .k8s), parseGroup("k8s"));
     try std.testing.expectEqual(@as(?tool_mod.Group, .cloud), parseGroup("cloud"));
     try std.testing.expectEqual(@as(?tool_mod.Group, .containers), parseGroup("containers"));
-    try std.testing.expectEqual(@as(?tool_mod.Group, .config), parseGroup("config"));
+    try std.testing.expectEqual(@as(?tool_mod.Group, .cm), parseGroup("cm"));
 }
 
 fn parseGroup(name: []const u8) ?tool_mod.Group {
@@ -278,7 +278,7 @@ fn parseGroup(name: []const u8) ?tool_mod.Group {
     if (std.mem.eql(u8, name, "containers")) return .containers;
     if (std.mem.eql(u8, name, "utils")) return .utils;
     if (std.mem.eql(u8, name, "terminal")) return .terminal;
-    if (std.mem.eql(u8, name, "config")) return .config;
+    if (std.mem.eql(u8, name, "cm")) return .cm;
     if (std.mem.eql(u8, name, "security")) return .security;
     return null;
 }

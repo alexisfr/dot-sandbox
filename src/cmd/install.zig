@@ -489,7 +489,7 @@ pub fn parseGroup(name: []const u8) ?tool_mod.Group {
     if (std.mem.eql(u8, name, "containers")) return .containers;
     if (std.mem.eql(u8, name, "utils")) return .utils;
     if (std.mem.eql(u8, name, "terminal")) return .terminal;
-    if (std.mem.eql(u8, name, "config")) return .config;
+    if (std.mem.eql(u8, name, "cm")) return .cm;
     if (std.mem.eql(u8, name, "security")) return .security;
     return null;
 }
@@ -559,7 +559,7 @@ fn printVersionFetchWarning(err_name: []const u8) void {
 
 fn printUnknownGroup(name: []const u8) void {
     std.debug.print("{s}Error:{s} unknown group '{s}'\n", .{ output.red, output.reset, name });
-    std.debug.print("Available groups: k8s, cloud, iac, containers, utils, terminal, config, security, all\n", .{});
+    std.debug.print("Available groups: k8s, cloud, iac, containers, utils, terminal, cm, security, all\n", .{});
 }
 
 fn printGroupToolError(id: []const u8, err: anyerror) void {

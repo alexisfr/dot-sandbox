@@ -27,9 +27,9 @@ case "$ARCH" in
     ;;
 esac
 
-# ── 2. Download binary ────────────────────────────────────────────────────────
+# ── 2. Download and extract tarball ──────────────────────────────────────────
 
-ASSET="dot-${os}-${arch}"
+ASSET="dot-${os}-${arch}.tar.gz"
 URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
 
 echo "Installing dot..."
@@ -39,13 +39,15 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 if command -v curl >/dev/null 2>&1; then
-  curl -fsSL "$URL" -o "$TMP/dot"
+  curl -fsSL "$URL" -o "$TMP/dot.tar.gz"
 elif command -v wget >/dev/null 2>&1; then
-  wget -qO "$TMP/dot" "$URL"
+  wget -qO "$TMP/dot.tar.gz" "$URL"
 else
   echo "error: curl or wget is required" >&2
   exit 1
 fi
+
+tar -xzf "$TMP/dot.tar.gz" -C "$TMP"
 
 # ── 3. Install binary ─────────────────────────────────────────────────────────
 

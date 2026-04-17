@@ -4,7 +4,7 @@ const platform = @import("platform.zig");
 const archive = @import("archive.zig");
 const output = @import("ui/output.zig");
 
-pub const Group = enum { k8s, cloud, iac, containers, utils, terminal, config, security };
+pub const Group = enum { k8s, cloud, iac, containers, utils, terminal, cm, security };
 
 // ─── Version resolution ───────────────────────────────────────────────────────
 
@@ -677,6 +677,8 @@ pub fn renderTemplate(allocator: std.mem.Allocator, tmpl: []const u8, ctx: *cons
                 ctx.architecture.goName()
             else if (std.mem.eql(u8, key, "arch_uname"))
                 ctx.architecture.unameName()
+            else if (std.mem.eql(u8, key, "arch_alt"))
+                ctx.architecture.altName()
             else if (std.mem.eql(u8, key, "os_title"))
                 ctx.operating_system.titleName()
             else

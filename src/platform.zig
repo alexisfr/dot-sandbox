@@ -79,6 +79,16 @@ pub const Arch = enum {
             .i386 => "i686",
         };
     }
+
+    /// Hybrid arch name used by tools like lazygit (x86_64 for Intel, arm64 for ARM)
+    pub fn altName(self: Arch) []const u8 {
+        return switch (self) {
+            .x86_64 => "x86_64",
+            .aarch64 => "arm64",
+            .arm => "arm",
+            .i386 => "386",
+        };
+    }
 };
 
 pub const Shell = enum {

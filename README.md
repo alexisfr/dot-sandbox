@@ -30,8 +30,8 @@ curl -fsSL https://raw.githubusercontent.com/the-devops-hub/dot/main/install.sh 
 Restart your shell (or `source ~/.zshrc` / `source ~/.config/fish/config.fish`), then:
 
 ```sh
-dot install --group k8s     # kubectl, helm, k9s, kubelogin
-dot install --group iac     # terraform, vault
+dot install --group k8s     # kubectl, helm, k9s, kubelogin, argocd
+dot install --group iac     # terraform, opentofu, terragrunt, and more
 dot install --group all     # everything, no regrets
 ```
 
@@ -53,9 +53,9 @@ dot doctor                  # health check
 
 | Group        | Tools                                                            |
 | ------------ | ---------------------------------------------------------------- |
-| `k8s`        | helm, kubectl, k9s, kubelogin                                    |
+| `k8s`        | helm, kubectl, k9s, kubelogin, argocd                           |
 | `iac`        | terraform, opentofu, tflint, terraform-docs, hcledit, terragrunt |
-| `config`     | ansible, gh                                                      |
+| `cm`         | ansible, gh, lazygit                                             |
 | `cloud`      | aws, gcloud, oci                                                 |
 | `containers` | podman                                                           |
 | `utils`      | jq, yq, btop, tldr                                               |

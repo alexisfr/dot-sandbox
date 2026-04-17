@@ -521,7 +521,7 @@ fn parseGroupStr(name: []const u8) ?tool.Group {
     if (std.mem.eql(u8, name, "containers")) return .containers;
     if (std.mem.eql(u8, name, "utils")) return .utils;
     if (std.mem.eql(u8, name, "terminal")) return .terminal;
-    if (std.mem.eql(u8, name, "config")) return .config;
+    if (std.mem.eql(u8, name, "cm")) return .cm;
     if (std.mem.eql(u8, name, "security")) return .security;
     return null;
 }
@@ -599,12 +599,12 @@ test "countToolsInJson: counts correctly" {
     try std.testing.expectEqual(@as(usize, 3), count);
 }
 
-test "builtin_repo_bytes: parses all 19 built-in tools" {
+test "builtin_repo_bytes: parses all built-in tools" {
     var gpa: std.heap.DebugAllocator(.{}) = .{};
     defer _ = gpa.deinit();
     const alloc = gpa.allocator();
     var arena_inst = std.heap.ArenaAllocator.init(alloc);
     defer arena_inst.deinit();
     const tools = try parseRepositoryJson(arena_inst.allocator(), alloc, builtin_repo_bytes);
-    try std.testing.expectEqual(@as(usize, 24), tools.len);
+    try std.testing.expectEqual(@as(usize, 25), tools.len);
 }

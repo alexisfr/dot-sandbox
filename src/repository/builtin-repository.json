@@ -249,7 +249,7 @@
             "name": "Ansible",
             "description": "IT automation platform for configuration management and deployment",
             "groups": [
-                "config"
+                "cm"
             ],
             "homepage": "https://www.ansible.com",
             "brew_formula": "ansible",
@@ -388,7 +388,7 @@
             "name": "GitHub CLI",
             "description": "GitHub's official command line tool",
             "groups": [
-                "config"
+                "cm"
             ],
             "homepage": "https://cli.github.com",
             "brew_formula": "gh",
@@ -405,6 +405,26 @@
                 "bash_cmd": "source <(gh completion -s bash)",
                 "zsh_cmd": "source <(gh completion -s zsh)",
                 "fish_cmd": "gh completion -s fish | source"
+            }
+        },
+        {
+            "id": "lazygit",
+            "name": "lazygit",
+            "description": "Simple terminal UI for git commands",
+            "groups": [
+                "cm"
+            ],
+            "homepage": "https://github.com/jesseduffield/lazygit",
+            "brew_formula": "lazygit",
+            "aliases": ["lg"],
+            "version_source": {
+                "type": "github_release",
+                "repo": "jesseduffield/lazygit"
+            },
+            "strategy": {
+                "type": "github_release",
+                "url_template": "https://github.com/jesseduffield/lazygit/releases/download/v{version}/lazygit_{version}_{os_title}_{arch_alt}.tar.gz",
+                "binary_in_archive": "lazygit"
             }
         },
         {

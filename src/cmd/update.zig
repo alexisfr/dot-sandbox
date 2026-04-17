@@ -1,6 +1,7 @@
 const std = @import("std");
 const http = @import("../http.zig");
 const platform = @import("../platform.zig");
+const archive = @import("../archive.zig");
 const output = @import("../ui/output.zig");
 const state_mod = @import("../state.zig");
 const tool_mod = @import("../tool.zig");
@@ -78,30 +79,28 @@ pub fn run(
     const os_type = platform.OperatingSystem.current();
     const arch_type = platform.Arch.current();
 
-    // Asset is a plain binary named dot-{os}-{arch} (e.g. dot-linux-amd64).
+    // Asset is a tarball named dot-{os}-{arch}.tar.gz (e.g. dot-linux-amd64.tar.gz).
     const url = try std.fmt.allocPrint(
         allocator,
-        "https://github.com/{s}/releases/download/v{s}/dot-{s}-{s}",
+        "https://github.com/{s}/releases/download/v{s}/dot-{s}-{s}.tar.gz",
         .{ version_mod.github_repo, latest, os_type.name(), arch_type.goName() },
     );
     defer allocator.free(url);
 
-    // Install path
-    const home = std.posix.getenv("HOME") orelse "/tmp";
-    const bin_dir = try std.fs.path.join(allocator, &.{ home, ".local", "bin" });
-    defer allocator.free(bin_dir);
-    std.fs.cwd().makePath(bin_dir) catch {};
+    // Temp directory for download and extraction
+    const tmp_dir = try std.fmt.allocPrint(allocator, "/tmp/dot-update-{s}", .{latest});
+    defer allocator.free(tmp_dir);
+    std.fs.cwd().makePath(tmp_dir) catch {};
+    defer std.fs.cwd().deleteTree(tmp_dir) catch {};
 
-    const dest = try std.fs.path.join(allocator, &.{ bin_dir, "dot" });
-    defer allocator.free(dest);
-    const tmp_dest = try std.fmt.allocPrint(allocator, "{s}.new", .{dest});
-    defer allocator.free(tmp_dest);
+    const archive_path = try std.fs.path.join(allocator, &.{ tmp_dir, "dot.tar.gz" });
+    defer allocator.free(archive_path);
 
-    // Download directly to a sibling .new file, then rename atomically.
+    // Download the tarball
     var bar = progress_mod.ProgressBar{ .step = "Downloading" };
     const progress = http.ProgressCallback{ .context = &bar, .func = progressCbFn };
 
-    http.download(allocator, url, tmp_dest, progress) catch |e| {
+    http.download(allocator, url, archive_path, progress) catch |e| {
         bar.finish();
         var status_buf: [32]u8 = undefined;
         const hint: []const u8 = switch (http.last_status) {
@@ -117,7 +116,41 @@ pub fn run(
     };
     bar.finish();
 
-    // Make executable and atomically replace the running binary.
+    // Extract
+    const extract_dir = try std.fs.path.join(allocator, &.{ tmp_dir, "extract" });
+    defer allocator.free(extract_dir);
+
+    output.printStepStart("Extracting", "dot.tar.gz");
+    archive.extractTarGz(archive_path, extract_dir, 0) catch |e| {
+        output.printStepDone("Extracting", "failed");
+        output.printFmt("{s}Error:{s} {s}\n", .{ output.red, output.reset, @errorName(e) });
+        output.printError("Update failed");
+        return error.CommandFailed;
+    };
+    output.printStepDone("Extracting", "dot.tar.gz");
+
+    // The binary inside the tarball is named "dot"
+    const src_bin = try std.fs.path.join(allocator, &.{ extract_dir, "dot" });
+    defer allocator.free(src_bin);
+
+    // Install path
+    const home = std.posix.getenv("HOME") orelse "/tmp";
+    const bin_dir = try std.fs.path.join(allocator, &.{ home, ".local", "bin" });
+    defer allocator.free(bin_dir);
+    std.fs.cwd().makePath(bin_dir) catch {};
+
+    const dest = try std.fs.path.join(allocator, &.{ bin_dir, "dot" });
+    defer allocator.free(dest);
+    const tmp_dest = try std.fmt.allocPrint(allocator, "{s}.new", .{dest});
+    defer allocator.free(tmp_dest);
+
+    // Copy, chmod, atomic rename
+    std.fs.cwd().copyFile(src_bin, std.fs.cwd(), tmp_dest, .{}) catch |e| {
+        output.printStep("Install", output.sym_fail, @errorName(e));
+        output.printError("Could not copy binary");
+        return error.CommandFailed;
+    };
+
     const chmod = try std.process.Child.run(.{
         .allocator = allocator,
         .argv = &.{ "chmod", "+x", tmp_dest },
