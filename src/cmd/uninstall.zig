@@ -112,7 +112,8 @@ pub fn run(
 // ─── Uninstall-specific print functions ───────────────────────────────────────
 
 fn printToolUninstalled(id: []const u8) void {
-    std.debug.print("\n{s}{s}{s} {s}{s}{s} uninstalled\n\n", .{ output.green, output.sym_check, output.reset, output.bold, id, output.reset });
+    output.printSectionHeaderFmt("{s} uninstalled", .{id});
+    std.debug.print("\n", .{});
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

@@ -352,7 +352,8 @@
             "version_source": {
                 "type": "github_release",
                 "repo": "dbrgn/tealdeer",
-                "strip_prefix": "v"
+                "strip_prefix": "v",
+                "require_asset": "tealdeer-linux-"
             },
             "strategy": {
                 "type": "direct_binary",
@@ -466,6 +467,25 @@
                 "apt": "podman",
                 "dnf": "podman",
                 "brew": "podman"
+            }
+        },
+        {
+            "id": "podman-compose",
+            "name": "podman-compose",
+            "description": "Docker Compose implementation for Podman (enables `podman compose`)",
+            "groups": [
+                "containers"
+            ],
+            "homepage": "https://github.com/containers/podman-compose",
+            "version_source": {
+                "type": "pypi",
+                "package": "podman-compose"
+            },
+            "strategy": {
+                "type": "pip_venv",
+                "package": "podman-compose",
+                "install_dir_rel": "~/.local/opt/podman-compose",
+                "binary_name": "podman-compose"
             }
         },
         {

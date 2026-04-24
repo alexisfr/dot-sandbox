@@ -68,7 +68,7 @@ pub fn run(
     const target = parsed.target;
 
     if (target) |name| {
-        // Group upgrade: only upgrade tools in the group that are already installed
+        // Group upgrade: only upgrade installed tools in the group
         if (install_cmd.parseGroup(name)) |group| {
             var candidates: std.ArrayList(tool_mod.Tool) = .empty;
             defer candidates.deinit(allocator);
@@ -81,16 +81,9 @@ pub fn run(
                     }
                 }
             }
-            if (candidates.items.len > 0) {
-                std.debug.print("Upgrading group '{s}' ({d} installed)...\n", .{ name, candidates.items.len });
-            }
-            for (candidates.items, 0..) |t, i| {
-                install_cmd.printGroupToolSeparator(t.name, i + 1, candidates.items.len);
-                const argv: []const []const u8 = if (force) &.{ t.id, "--force" } else &.{t.id};
-                install_cmd.run(allocator, argv, state, tools) catch |e| {
-                    output.printFmt("Failed to upgrade {s}: {s}\n", .{ t.id, @errorName(e) });
-                };
-            }
+            if (candidates.items.len == 0) return;
+            output.printSectionHeaderFmt("Upgrading group '{s}' ({d} installed)", .{ name, candidates.items.len });
+            try runBatch(allocator, candidates.items, force, state, tools);
             return;
         }
 
@@ -121,19 +114,48 @@ pub fn run(
             return;
         }
 
-        std.debug.print("Upgrading {d} installed tool{s}...\n", .{
+        output.printSectionHeaderFmt("Upgrading {d} installed tool{s}", .{
             candidates.items.len,
             if (candidates.items.len == 1) @as([]const u8, "") else "s",
         });
-
-        for (candidates.items, 0..) |t, i| {
-            install_cmd.printGroupToolSeparator(t.name, i + 1, candidates.items.len);
-            const argv: []const []const u8 = if (force) &.{ t.id, "--force" } else &.{t.id};
-            install_cmd.run(allocator, argv, state, tools) catch |e| {
-                output.printFmt("Failed to upgrade {s}: {s}\n", .{ t.id, @errorName(e) });
-            };
-        }
+        try runBatch(allocator, candidates.items, force, state, tools);
     }
+}
+
+/// Run a batch upgrade loop over `candidates`, print a summary at the end.
+fn runBatch(
+    allocator: std.mem.Allocator,
+    candidates: []const tool_mod.Tool,
+    force: bool,
+    state: *state_mod.State,
+    tools: []const tool_mod.Tool,
+) !void {
+    const start_ms = std.time.milliTimestamp();
+    var upgraded: usize = 0;
+    var already_current: usize = 0;
+    var failed: usize = 0;
+
+    for (candidates, 0..) |t, i| {
+        install_cmd.printGroupToolSeparator(t.name, i + 1, candidates.len);
+
+        // Snapshot version before the run to detect an actual upgrade.
+        const before = if (state.getVersion(t.id)) |v| allocator.dupe(u8, v) catch null else null;
+        defer if (before) |b| allocator.free(b);
+
+        const argv: []const []const u8 = if (force) &.{ t.id, "--force" } else &.{t.id};
+        install_cmd.run(allocator, argv, state, tools) catch |e| {
+            output.printFmt("Failed to upgrade {s}: {s}\n", .{ t.id, @errorName(e) });
+            failed += 1;
+            continue;
+        };
+
+        const after = state.getVersion(t.id);
+        const changed = if (before) |b| if (after) |a| !std.mem.eql(u8, b, a) else true else false;
+        if (changed) upgraded += 1 else already_current += 1;
+    }
+
+    const elapsed_ms: u64 = @intCast(@max(0, std.time.milliTimestamp() - start_ms));
+    output.printSummary(upgraded, already_current, failed, elapsed_ms);
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

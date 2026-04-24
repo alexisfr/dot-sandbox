@@ -24,6 +24,9 @@ pub const VersionSource = union(enum) {
         /// If non-null, strip this prefix from the tag to form the version string.
         /// e.g. strip_prefix = "jq-" turns tag "jq-1.8.1" into version "1.8.1".
         strip_prefix: ?[]const u8 = null,
+        /// If non-null, skip releases that have no asset whose name contains this substring.
+        /// Useful when a project publishes binary-less patch releases for older branches.
+        require_asset: ?[]const u8 = null,
     };
 
     pub const Hashicorp = struct {
@@ -65,10 +68,12 @@ pub const VersionSource = union(enum) {
         defer allocator.free(body);
 
         // Parse JSON array of release objects
+        const Asset = struct { name: []const u8 = "" };
         const Release = struct {
             tag_name: []const u8 = "",
             prerelease: bool = false,
             draft: bool = false,
+            assets: []Asset = &.{},
         };
         const parsed = std.json.parseFromSlice(
             []Release,
@@ -83,6 +88,16 @@ pub const VersionSource = union(enum) {
             const tag = rel.tag_name;
             if (gh.filter) |prefix| {
                 if (!std.mem.startsWith(u8, tag, prefix)) continue;
+            }
+            if (gh.require_asset) |required| {
+                var has_asset = false;
+                for (rel.assets) |asset| {
+                    if (std.mem.indexOf(u8, asset.name, required) != null) {
+                        has_asset = true;
+                        break;
+                    }
+                }
+                if (!has_asset) continue;
             }
             const ver = tagToVersion(tag, gh.strip_prefix);
             return allocator.dupe(u8, ver);
@@ -577,7 +592,7 @@ pub const InstallStrategy = union(enum) {
                 defer ctx.allocator.free(dst);
                 std.fs.cwd().makePath(ctx.bin_dir) catch {};
                 std.fs.cwd().deleteFile(dst) catch {};
-                std.fs.cwd().symLink(src, dst, .{}) catch {};
+                try std.fs.cwd().symLink(src, dst, .{});
             }
         }
     };

@@ -38,26 +38,26 @@ pub fn run(
     }
 
     // Resolve latest version from GitHub
-    std.debug.print("{s} Checking latest dot version...\n", .{output.sym_search});
+    output.printStep("Checking", output.sym_ok, "dot");
     const version_source = tool_mod.VersionSource{ .github_release = .{ .repo = version_mod.github_repo } };
     const latest = version_source.resolve(allocator) catch |e| {
         const api_url = "https://api.github.com/repos/" ++ version_mod.github_repo ++ "/releases";
         switch (e) {
             error.VersionFetchFailed => {
-                output.printFmt("{s}Error:{s} could not reach GitHub API\n", .{ output.red, output.reset });
+                output.printError("could not reach GitHub API");
                 std.debug.print("  URL: {s}\n", .{api_url});
                 std.debug.print("  The repository may be private, or you may be offline.\n", .{});
             },
             error.VersionNotFound => {
-                output.printFmt("{s}Error:{s} no stable releases found\n", .{ output.red, output.reset });
+                output.printError("no stable releases found");
                 std.debug.print("  URL: {s}\n", .{api_url});
                 std.debug.print("  No releases have been published yet.\n", .{});
             },
             error.VersionParseFailed => {
-                output.printFmt("{s}Error:{s} unexpected response from GitHub API\n", .{ output.red, output.reset });
+                output.printError("unexpected response from GitHub API");
                 std.debug.print("  URL: {s}\n", .{api_url});
             },
-            else => output.printFmt("{s}Error:{s} {s}\n", .{ output.red, output.reset, @errorName(e) }),
+            else => output.printError(@errorName(e)),
         }
         return;
     };
@@ -66,15 +66,16 @@ pub fn run(
     const current = version_mod.current;
 
     if (!force and std.mem.eql(u8, current, latest)) {
-        std.debug.print("\n{s}{s}{s} dot {s} — already up to date\n\n", .{
-            output.green, output.sym_check, output.reset, current,
+        std.debug.print("{s}Warning:{s} dot {s} is already up to date.\n", .{
+            output.yellow, output.reset, current,
         });
+        std.debug.print("To reinstall: dot update --force\n", .{});
         return;
     }
 
-    std.debug.print("\n{s} {s}Updating dot{s} {s} → {s}\n\n", .{
-        output.sym_install, output.bold, output.reset, current, latest,
-    });
+    var dl_buf: [128]u8 = undefined;
+    const dl_step = std.fmt.bufPrint(&dl_buf, "Downloading dot {s}", .{latest}) catch "Downloading dot";
+    output.printStep(dl_step, output.sym_ok, "");
 
     const os_type = platform.OperatingSystem.current();
     const arch_type = platform.Arch.current();
@@ -120,14 +121,10 @@ pub fn run(
     const extract_dir = try std.fs.path.join(allocator, &.{ tmp_dir, "extract" });
     defer allocator.free(extract_dir);
 
-    output.printStepStart("Extracting", "dot.tar.gz");
     archive.extractTarGz(archive_path, extract_dir, 0) catch |e| {
-        output.printStepDone("Extracting", "failed");
-        output.printFmt("{s}Error:{s} {s}\n", .{ output.red, output.reset, @errorName(e) });
-        output.printError("Update failed");
+        output.printError(@errorName(e));
         return error.CommandFailed;
     };
-    output.printStepDone("Extracting", "dot.tar.gz");
 
     // The binary inside the tarball is named "dot"
     const src_bin = try std.fs.path.join(allocator, &.{ extract_dir, "dot" });
@@ -164,15 +161,11 @@ pub fn run(
         return error.CommandFailed;
     };
 
-    output.printStep("Installed", output.sym_ok, dest);
+    output.printStep("Installing dot", output.sym_ok, "");
+    std.debug.print("   {s}\n", .{dest});
 
     // Update state
     try state.addTool("dot", latest, "github_release", false);
-
-    std.debug.print("\n{s}{s}{s} dot updated to {s}{s}{s}!\n\n", .{
-        output.green, output.sym_check, output.reset,
-        output.bold,  latest,           output.reset,
-    });
 }
 
 fn progressCbFn(ctx: *anyopaque, done: u64, total: ?u64) void {

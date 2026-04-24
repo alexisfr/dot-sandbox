@@ -5,12 +5,15 @@ const state_mod = @import("../state.zig");
 const output = @import("../ui/output.zig");
 
 const help =
-    \\Usage: dot list [--group <group>]
+    \\Usage: dot list [options]
     \\
     \\List all tools with their install status.
     \\
     \\Options:
     \\  --group, -g <g>   Show only tools in the given group
+    \\  --installed, -i   Show only installed tools
+    \\  --pinned          Show only pinned tools
+    \\  --details, -l     Show version/installed/method columns (installed tools only)
     \\  --help, -h        Show this help
     \\
     \\Groups:  k8s, cloud, iac, containers, utils, terminal, cm, security, all
@@ -18,6 +21,8 @@ const help =
     \\Examples:
     \\  dot list
     \\  dot list --group k8s
+    \\  dot list --installed
+    \\  dot list --installed --details
     \\
 ;
 
@@ -54,6 +59,9 @@ pub fn run(
     }
 
     var group_filter: ?tool_mod.Group = null;
+    var installed_only = false;
+    var pinned_only = false;
+    var details_mode = false;
 
     var arg_idx: usize = 0;
     while (arg_idx < args.len) : (arg_idx += 1) {
@@ -61,13 +69,19 @@ pub fn run(
         if (std.mem.eql(u8, arg, "--group") or std.mem.eql(u8, arg, "-g")) {
             arg_idx += 1;
             if (arg_idx < args.len) group_filter = parseGroup(args[arg_idx]);
+        } else if (std.mem.eql(u8, arg, "--installed") or std.mem.eql(u8, arg, "-i")) {
+            installed_only = true;
+        } else if (std.mem.eql(u8, arg, "--pinned")) {
+            pinned_only = true;
+            installed_only = true; // pinned implies installed
+        } else if (std.mem.eql(u8, arg, "--details") or std.mem.eql(u8, arg, "-l")) {
+            details_mode = true;
+            installed_only = true; // details implies installed
         }
     }
 
     const term_width = getTermWidth();
     const desc_width = if (term_width > overhead) term_width - overhead else desc_min;
-
-    printListHeader(term_width);
 
     const home = std.posix.getenv("HOME") orelse "";
 
@@ -81,6 +95,14 @@ pub fn run(
                 if (g == gf) { in_group = true; break; }
             }
             if (!in_group) continue;
+        }
+        if (installed_only) {
+            const entry = state.tools.get(t.id);
+            if (entry == null) continue;
+        }
+        if (pinned_only) {
+            const entry = state.tools.get(t.id);
+            if (entry == null or !entry.?.pinned) continue;
         }
         try matched.append(allocator, t);
     }
@@ -105,19 +127,31 @@ pub fn run(
     };
     std.mem.sort(*const tool_mod.Tool, matched.items, {}, cmp.lt);
 
-    for (matched.items) |t| {
-        var groups_buf: [64]u8 = undefined;
-        var groups_writer: std.Io.Writer = .fixed(&groups_buf);
-        for (t.groups, 0..) |group, idx| {
-            if (idx > 0) groups_writer.writeByte(',') catch {};
-            groups_writer.writeAll(@tagName(group)) catch {};
+    if (details_mode) {
+        printDetailsHeader(term_width);
+        for (matched.items) |t| {
+            const entry = state.tools.get(t.id) orelse continue;
+            var date_buf: [24]u8 = undefined;
+            const date = fmtTimestamp(entry.installed_at, &date_buf);
+            const pin_str: []const u8 = if (entry.pinned) output.sym_pin else "";
+            printDetailsRow(t.id, entry.version, date, entry.method, pin_str);
         }
+    } else {
+        printListHeader(term_width);
+        for (matched.items) |t| {
+            var groups_buf: [64]u8 = undefined;
+            var groups_writer: std.Io.Writer = .fixed(&groups_buf);
+            for (t.groups, 0..) |group, idx| {
+                if (idx > 0) groups_writer.writeByte(',') catch {};
+                groups_writer.writeAll(@tagName(group)) catch {};
+            }
 
-        const maybe_entry = state.tools.get(t.id);
-        const version: ?[]const u8 = if (maybe_entry) |e| e.version else null;
-        const sys = if (version == null) isSystemInstalled(allocator, t.id) else false;
-        const unmanaged = if (version == null and !sys) isUnmanagedLocal(home, t.id, allocator) else false;
-        printListRow(t.id, t.aliases, t.description, version, sys, unmanaged, groups_writer.buffered(), desc_width);
+            const maybe_entry = state.tools.get(t.id);
+            const version: ?[]const u8 = if (maybe_entry) |e| e.version else null;
+            const sys = if (version == null) isSystemInstalled(allocator, t.id) else false;
+            const unmanaged = if (version == null and !sys) isUnmanagedLocal(home, t.id, allocator) else false;
+            printListRow(t.id, t.aliases, t.description, version, sys, unmanaged, groups_writer.buffered(), desc_width);
+        }
     }
 
     const filter_name: ?[]const u8 = if (group_filter) |gf| @tagName(gf) else null;
@@ -126,14 +160,48 @@ pub fn run(
 
 // ─── List-specific print functions ────────────────────────────────────────────
 
+fn fmtTimestamp(ts_str: []const u8, buf: []u8) []const u8 {
+    const secs = std.fmt.parseInt(u64, ts_str, 10) catch return ts_str;
+    const epoch_secs = std.time.epoch.EpochSeconds{ .secs = secs };
+    const year_day = epoch_secs.getEpochDay().calculateYearDay();
+    const month_day = year_day.calculateMonthDay();
+    const day_secs = secs % (24 * 3600);
+    const hours = day_secs / 3600;
+    const minutes = (day_secs % 3600) / 60;
+    const seconds = day_secs % 60;
+    return std.fmt.bufPrint(buf, "{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}", .{
+        year_day.year,
+        month_day.month.numeric(),
+        month_day.day_index + 1,
+        hours,
+        minutes,
+        seconds,
+    }) catch ts_str;
+}
+
+fn printDetailsHeader(term_width: usize) void {
+    _ = term_width;
+    output.printSectionHeader("Installed Tools");
+    std.debug.print("\n{s}{s:<16} {s:<14} {s:<24} {s:<18} {s}{s}\n", .{
+        output.bold, "Tool", "Version", "Installed At", "Method", "Pinned", output.reset,
+    });
+}
+
+fn printDetailsRow(id: []const u8, version: []const u8, installed_at: []const u8, method: []const u8, pin: []const u8) void {
+    const v_trunc = version[0..@min(version.len, 13)];
+    const at_trunc = installed_at[0..@min(installed_at.len, 23)];
+    const m_trunc = method[0..@min(method.len, 17)];
+    std.debug.print("{s:<16} {s}{s:<14}{s} {s:<24} {s:<18} {s}\n", .{
+        id, output.green, v_trunc, output.reset, at_trunc, m_trunc, pin,
+    });
+}
+
 fn printListHeader(term_width: usize) void {
-    std.debug.print("\n{s}{s}Available Tools{s}\n\n", .{ output.cyan, output.bold, output.reset });
-    std.debug.print("{s}{s:<16} {s:<14} {s:<16} Description{s}\n", .{
+    _ = term_width;
+    output.printSectionHeader("Available Tools");
+    std.debug.print("\n{s}{s:<16} {s:<14} {s:<16} Description{s}\n", .{
         output.bold, "Tool", "Status", "Groups", output.reset,
     });
-    std.debug.print("{s}", .{output.dim});
-    for (0..@min(term_width, 200)) |_| std.debug.print("{s}", .{output.sym_dash});
-    std.debug.print("{s}\n", .{output.reset});
 }
 
 /// Truncate desc to at most max_visual visual chars, breaking at a word boundary

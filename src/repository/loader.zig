@@ -393,6 +393,7 @@ fn parseVersionSource(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.V
             .repo = try arena.dupe(u8, repo_val.string),
             .filter = if (obj.get("filter")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
             .strip_prefix = if (obj.get("strip_prefix")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
+            .require_asset = if (obj.get("require_asset")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
         } };
     } else if (std.mem.eql(u8, type_str, "hashicorp")) {
         const prod = obj.get("product") orelse return error.MissingProduct;
@@ -417,6 +418,7 @@ fn parseVersionSource(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.V
             .repo = try arena.dupe(u8, repo_val.string),
             .filter = if (obj.get("filter")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
             .strip_prefix = if (obj.get("strip_prefix")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
+            .require_asset = if (obj.get("require_asset")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
         } };
     } else {
         return error.UnknownVersionSourceType;
@@ -606,5 +608,5 @@ test "builtin_repo_bytes: parses all built-in tools" {
     var arena_inst = std.heap.ArenaAllocator.init(alloc);
     defer arena_inst.deinit();
     const tools = try parseRepositoryJson(arena_inst.allocator(), alloc, builtin_repo_bytes);
-    try std.testing.expectEqual(@as(usize, 25), tools.len);
+    try std.testing.expectEqual(@as(usize, 26), tools.len);
 }

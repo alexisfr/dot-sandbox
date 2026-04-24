@@ -32,7 +32,6 @@ test {
     _ = @import("cmd/upgrade.zig");
     _ = @import("cmd/uninstall.zig");
     _ = @import("cmd/list.zig");
-    _ = @import("cmd/status.zig");
     _ = @import("cmd/repository.zig");
     _ = @import("cli.zig");
 }

@@ -24,14 +24,6 @@ const help =
 
 // ─── Doctor-specific print functions ──────────────────────────────────────────
 
-fn printDoctorHeader() void {
-    std.debug.print("\n{s}{s} Running system checks...{s}\n\n", .{ output.bold, output.sym_search, output.reset });
-}
-
-fn printDoctorSection(title: []const u8) void {
-    std.debug.print("\n{s}{s}:{s}\n", .{ output.cyan, title, output.reset });
-}
-
 fn printCheckPass(label: []const u8, detail: []const u8) void {
     std.debug.print("  {s}{s}{s} {s:<24} {s}\n", .{ output.green, output.sym_ok, output.reset, label, detail });
 }
@@ -45,13 +37,11 @@ fn printCheckFail(label: []const u8, detail: []const u8) void {
 }
 
 fn printDoctorSummary(pass: usize, warn: usize, fail: usize) void {
-    std.debug.print("\n{s}Summary:{s} {s}{d} passed{s}, {s}{d} warnings{s}, {s}{d} failed{s}\n\n", .{
-        output.bold,  output.reset,
-        output.green, pass,
-        output.reset, output.yellow,
-        warn,         output.reset,
-        output.red,   fail,
-        output.reset,
+    output.printSectionHeader("Summary");
+    std.debug.print("  {s}{d} passed{s}  ·  {s}{d} warnings{s}  ·  {s}{d} failed{s}\n\n", .{
+        output.green,  pass,  output.reset,
+        output.yellow, warn,  output.reset,
+        if (fail > 0) output.red else output.dim, fail, output.reset,
     });
 }
 
@@ -145,7 +135,7 @@ pub fn run(
         }
     }
 
-    printDoctorHeader();
+    output.printSectionHeader("System Health Check");
 
     var pass: usize = 0;
     var warn: usize = 0;
@@ -153,7 +143,9 @@ pub fn run(
 
     const home = std.posix.getenv("HOME") orelse "/tmp";
 
-    // Platform
+    // System checks
+    output.printSectionHeader("System");
+
     const os_type = platform.OperatingSystem.current();
     const arch_type = platform.Arch.current();
     printCheckPass("OS", os_type.name());
@@ -161,12 +153,10 @@ pub fn run(
     printCheckPass("Arch", arch_type.goName());
     pass += 1;
 
-    // Shell
     const shell_type = platform.Shell.detect();
     printCheckPass("Shell", shell_type.name());
     pass += 1;
 
-    // Package manager
     const pkg_mgr = platform.PackageManager.detect();
     if (pkg_mgr != .unknown) {
         printCheckPass("Package Manager", pkg_mgr.command() orelse "unknown");
@@ -176,7 +166,6 @@ pub fn run(
         warn += 1;
     }
 
-    // ~/.local/bin in PATH
     const path_env = std.posix.getenv("PATH") orelse "";
     const local_bin_abs = std.fs.path.join(allocator, &.{ home, ".local", "bin" }) catch null;
     if (local_bin_abs) |lb| {
@@ -190,9 +179,8 @@ pub fn run(
         }
     }
 
-    // Installed tools: check ~/.local/bin/<id> first, fall back to `which` for
-    // system-package installs whose binary lands elsewhere in PATH.
-    printDoctorSection("Installed Tools");
+    // Installed tools: binary check + orphan check + unmanaged check all in one section.
+    output.printSectionHeader("Installed Tools");
 
     var tool_iter = state.tools.iterator();
     while (tool_iter.next()) |kv| {
@@ -230,8 +218,6 @@ pub fn run(
 
     // State consistency: flag entries that are no longer in any repository.
     // "dot" is excluded — it is self-managed via `dot update`.
-    printDoctorSection("State Consistency");
-
     var has_orphan = false;
     var state_iter = state.tools.iterator();
     while (state_iter.next()) |kv| {
@@ -252,14 +238,9 @@ pub fn run(
             has_orphan = true;
         }
     }
-    if (!has_orphan) {
-        printCheckPass("All state entries", "present in repository");
-        pass += 1;
-    }
+    if (!has_orphan) pass += 1;
 
     // Unmanaged tools: binaries present in ~/.local/bin but not registered in state.
-    printDoctorSection("Unmanaged Tools");
-
     var unmanaged_count: usize = 0;
     for (tools) |t| {
         if (state.isInstalled(t.id)) continue;
@@ -272,14 +253,11 @@ pub fn run(
         warn += 1;
         unmanaged_count += 1;
     }
-    if (unmanaged_count == 0) {
-        printCheckPass("Unmanaged binaries", "none found");
-        pass += 1;
-    }
+    if (unmanaged_count == 0) pass += 1;
 
     // Shell integration: for the active shell, check and auto-fix the integration
     // file and RC source block. For all shells, scan for unguarded invocations.
-    printDoctorSection("Shell Integration");
+    output.printSectionHeader("Shell Integration");
 
     const all_shells = [_]platform.Shell{ .bash, .zsh, .fish };
     for (all_shells) |check_sh| {

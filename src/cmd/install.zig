@@ -215,7 +215,6 @@ fn installTool(
         version = try allocator.dupe(u8, v);
         version_owned = true;
     } else {
-        printFetchingVersion(tool.name);
         version = tool.version_source.resolve(allocator) catch |e| blk: {
             printVersionFetchWarning(@errorName(e));
             break :blk try allocator.dupe(u8, "latest");
@@ -248,8 +247,8 @@ fn installTool(
         if (state.getVersion(tool.id)) |installed_ver| {
             if (std.mem.eql(u8, installed_ver, version)) {
                 // Still regenerate the shell section in case the integration file was lost.
-                _ = writeShellIntegration(&tool, allocator);
-                printAlreadyReady(tool.name, installed_ver);
+                _ = writeShellIntegration(&tool, allocator, false);
+                printAlreadyReady(tool.name, installed_ver, tool.id);
                 return;
             }
         }
@@ -257,8 +256,6 @@ fn installTool(
 
     const operating_system = platform.OperatingSystem.current();
     const arch = platform.Arch.current();
-
-    printInstallHeader(tool.name, version, version_arg != null);
 
     // Brew install path: preferred when brew is available and tool declares a formula
     var used_brew = false;
@@ -287,6 +284,10 @@ fn installTool(
         std.fs.cwd().makePath(tmp_dir) catch {};
         defer std.fs.cwd().deleteTree(tmp_dir) catch {};
 
+        var dl_buf: [256]u8 = undefined;
+        const dl_step = std.fmt.bufPrint(&dl_buf, "Downloading {s} {s}", .{ tool.name, version }) catch "Downloading";
+        output.printStep(dl_step, output.sym_ok, "");
+
         var bar = progress_mod.ProgressBar{ .step = "Downloading" };
         var ctx = tool_mod.InstallContext{
             .allocator = allocator,
@@ -314,11 +315,16 @@ fn installTool(
             return error.CommandFailed;
         };
         bar.finish();
-        output.printStep("Installation", output.sym_ok, bin_dir);
+        var inst_buf: [128]u8 = undefined;
+        const inst_step = std.fmt.bufPrint(&inst_buf, "Installing {s}", .{tool.name}) catch "Installing";
+        output.printStep(inst_step, output.sym_ok, "");
+        var bin_path_buf: [512]u8 = undefined;
+        const bin_path = std.fmt.bufPrint(&bin_path_buf, "{s}/{s}", .{ bin_dir, tool.id }) catch bin_dir;
+        std.debug.print("   {s}\n", .{bin_path});
     }
 
     // Shell integration (always, regardless of install method)
-    _ = writeShellIntegration(&tool, allocator);
+    const shell_written = writeShellIntegration(&tool, allocator, false);
 
     // Post-install commands — only on fresh installs, not upgrades (non-fatal)
     if (!state.isInstalled(tool.id) and tool.post_install.len > 0) {
@@ -370,8 +376,7 @@ fn installTool(
     const method = if (used_brew) "brew" else @tagName(tool.strategy);
     try state.addTool(tool.id, version, method, version_arg != null);
 
-    // Success
-    printSuccess(tool.name, null);
+    if (shell_written) printShellReloadHint(platform.Shell.detect());
     if (tool.quick_start.len > 0) printQuickStart(tool.quick_start);
     if (tool.resources.len > 0) {
         var res_items: std.ArrayList([]const u8) = .empty;
@@ -432,14 +437,14 @@ pub fn buildShellSection(t: *const tool_mod.Tool, shell_type: platform.Shell, al
     return section.toOwnedSlice(allocator) catch null;
 }
 
-fn writeShellIntegration(t: *const tool_mod.Tool, allocator: std.mem.Allocator) bool {
+fn writeShellIntegration(t: *const tool_mod.Tool, allocator: std.mem.Allocator, print_step: bool) bool {
     const shell_type = platform.Shell.detect();
     if (shell_type == .unknown) return false;
     const section = buildShellSection(t, shell_type, allocator) orelse return false;
     defer allocator.free(section);
     shell_mod.ensureSourced(shell_type, allocator) catch {};
     shell_mod.addSection(shell_type, t.id, section, allocator) catch {};
-    output.printStep("Shell", output.sym_ok, shell_type.name());
+    if (print_step) output.printStep("Shell", output.sym_ok, shell_type.name());
     return true;
 }
 
@@ -496,32 +501,16 @@ pub fn parseGroup(name: []const u8) ?tool_mod.Group {
 
 // ─── Install-specific print functions ─────────────────────────────────────────
 
-fn printInstallHeader(tool_name: []const u8, version: []const u8, pinned: bool) void {
-    const icon = if (pinned) output.sym_pin else output.sym_install;
-    std.debug.print("\n{s} {s}Installing{s} {s} {s}\n\n", .{
-        icon, output.bold, output.reset, tool_name, version,
-    });
-}
-
-fn printSuccess(tool: []const u8, duration_s: ?u64) void {
-    if (duration_s) |d| {
-        std.debug.print("\n{s}{s}{s} {s}{s}{s} installed in {d}s!\n\n", .{
-            output.green, output.sym_check, output.reset, output.bold, tool, output.reset, d,
-        });
-    } else {
-        std.debug.print("\n{s}{s}{s} {s}{s}{s} installed!\n\n", .{
-            output.green, output.sym_check, output.reset, output.bold, tool, output.reset,
-        });
-    }
-}
-
 fn printPinnedSkip(tool_name: []const u8, tool_id: []const u8, version: []const u8) void {
     std.debug.print("{s}{s}{s} {s}{s}{s} is pinned at {s} — skipping\n", .{ output.cyan, output.sym_pin, output.reset, output.bold, tool_name, output.reset, version });
     std.debug.print("   To upgrade anyway: dot install {s} --force\n", .{tool_id});
 }
 
-fn printAlreadyReady(tool: []const u8, version: []const u8) void {
-    std.debug.print("\n{s}{s}{s} {s}{s}{s} {s} — already up to date\n\n", .{ output.green, output.sym_check, output.reset, output.bold, tool, output.reset, version });
+fn printAlreadyReady(tool: []const u8, version: []const u8, tool_id: []const u8) void {
+    std.debug.print("{s}Warning:{s} {s} {s} is already installed and up-to-date.\n", .{
+        output.yellow, output.reset, tool, version,
+    });
+    std.debug.print("To reinstall: dot install {s} --force\n", .{tool_id});
 }
 
 fn printQuickStart(cmds: []const []const u8) void {
@@ -539,18 +528,19 @@ fn printResources(items: []const []const u8) void {
     }
 }
 
-fn printSkipSystem(tool_name: []const u8, tool_id: []const u8, path: []const u8, sys_ver: []const u8, latest: []const u8) void {
-    std.debug.print("\n{s}{s}{s}  {s}{s}{s} detected via system package manager\n\n", .{
-        output.yellow, output.sym_warn, output.reset, output.bold, tool_name, output.reset,
-    });
-    std.debug.print("  Location: {s}\n", .{path});
-    std.debug.print("  Version:  {s}\n", .{sys_ver});
-    std.debug.print("  Latest:   {s}\n", .{latest});
-    std.debug.print("\n  To install dot's version, run: dot install {s} --force\n\n", .{tool_id});
+fn printShellReloadHint(shell_type: platform.Shell) void {
+    const file = shell_type.integrationFileName();
+    output.printSectionHeader("Caveats");
+    std.debug.print("  To activate in this shell:\n    source ~/.local/bin/{s}\n", .{file});
 }
 
-fn printFetchingVersion(name: []const u8) void {
-    std.debug.print("{s} Fetching version for {s}...\n", .{ output.sym_search, name });
+fn printSkipSystem(tool_name: []const u8, tool_id: []const u8, path: []const u8, sys_ver: []const u8, latest: []const u8) void {
+    std.debug.print("\n{s}Warning:{s} {s}{s}{s} is already installed (system)\n", .{
+        output.yellow, output.reset, output.bold, tool_name, output.reset,
+    });
+    std.debug.print("  Location:  {s}\n", .{path});
+    std.debug.print("  Version:   {s}  {s}  {s}\n", .{ sys_ver, output.sym_arrow, latest });
+    std.debug.print("To install dot's version: dot install {s} --force\n\n", .{tool_id});
 }
 
 fn printVersionFetchWarning(err_name: []const u8) void {
@@ -567,33 +557,11 @@ fn printGroupToolError(id: []const u8, err: anyerror) void {
 }
 
 fn printGroupBanner(group_name: []const u8, count: usize) void {
-    std.debug.print("Installing group '{s}' ({d} tools)...\n", .{ group_name, count });
+    output.printSectionHeaderFmt("Installing group '{s}' ({d} tools)", .{ group_name, count });
 }
 
 pub fn printGroupToolSeparator(name: []const u8, index: usize, total: usize) void {
-    const width = 48;
-    const counter_len = blk: {
-        // count digits in index and total, plus " [x/y] " = 7 + digits
-        var len: usize = 3; // " [" + "]"
-        var x = index;
-        while (x > 0) : (x /= 10) len += 1;
-        var y = total;
-        while (y > 0) : (y /= 10) len += 1;
-        break :blk len + 1; // +1 for "/"
-    };
-    const name_len = name.len;
-    const dashes_right = if (width > name_len + counter_len + 2)
-        width - name_len - counter_len - 2
-    else
-        0;
-
-    std.debug.print("\n{s}", .{output.dim});
-    for (0..2) |_| std.debug.print("{s}", .{output.sym_dash});
-    std.debug.print("{s} {s}{s}{s} [{d}/{d}] {s}", .{
-        output.reset, output.bold, name, output.reset, index, total, output.dim,
-    });
-    for (0..dashes_right) |_| std.debug.print("{s}", .{output.sym_dash});
-    std.debug.print("{s}\n", .{output.reset});
+    output.printSectionHeaderFmt("{s} ({d}/{d})", .{ name, index, total });
 }
 
 // ─── Fuzzy match ──────────────────────────────────────────────────────────────

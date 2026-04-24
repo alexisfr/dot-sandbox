@@ -42,6 +42,8 @@ pub fn initCaps() void {
         sym_dash = "-";
         sym_arrow = "->";
         sym_install = "[IN]";
+        spin_frames = &.{ "|", "/", "-", "\\" };
+        spin_frame_w = 1;
     }
 }
 
@@ -59,7 +61,7 @@ pub fn setRenderModeForTesting(mode: RenderMode) void {
 // cmd/ files import these variables rather than hardcoding escape sequences.
 // In plain/pipe mode, initCaps() sets these to empty strings.
 
-pub var cyan: []const u8 = "\x1b[0;36m";
+pub var cyan: []const u8 = "\x1b[1;34m";
 pub var green: []const u8 = "\x1b[1;32m";
 pub var red: []const u8 = "\x1b[1;31m";
 pub var yellow: []const u8 = "\x1b[1;33m";
@@ -89,6 +91,14 @@ pub var sym_ok_w: usize = 1;
 /// Visual width of sym_warn (1 in rich mode, 4 in plain/pipe for "WARN").
 pub var sym_warn_w: usize = 1;
 
+// ─── Spinner frames ───────────────────────────────────────────────────────────
+// Two paired frame sets: rich (braille) ↔ plain (slash). Both width-1 so
+// redraws never need to compensate for a changing cell count.
+// initCaps() swaps to the plain set when render_mode != .rich.
+
+pub var spin_frames: []const []const u8 = &.{ "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧" };
+pub var spin_frame_w: usize = 1; // visual column width of each frame glyph
+
 // ─── Common print functions ───────────────────────────────────────────────────
 
 /// Print plain text as-is. Used for HELP strings and similar.
@@ -115,92 +125,40 @@ pub fn printUnknownTool(id: []const u8) void {
     std.debug.print("Run 'dot list' to see available tools\n", .{});
 }
 
-// ─── Step progress (shared by install and uninstall commands) ─────────────────
-
-/// Pure mapping from step name to its icon/prefix for a given render mode.
-/// Exported so tests can verify the mapping without depending on global state.
-pub fn stepPrefixForMode(step: []const u8, mode: RenderMode) []const u8 {
-    if (mode == .rich) {
-        if (std.mem.startsWith(u8, step, "Pre-check")) return "🔍";
-        if (std.mem.startsWith(u8, step, "Download")) return "📥";
-        if (std.mem.startsWith(u8, step, "Verif")) return "🔐";
-        if (std.mem.startsWith(u8, step, "Extract")) return "📦";
-        if (std.mem.startsWith(u8, step, "Install")) return "🔧";
-        if (std.mem.startsWith(u8, step, "Status")) return "📌";
-        if (std.mem.startsWith(u8, step, "Shell")) return "🐚";
-        if (std.mem.startsWith(u8, step, "Config")) return "⚙️ ";
-        if (std.mem.startsWith(u8, step, "Link")) return "🔗";
-        if (std.mem.startsWith(u8, step, "Valid")) return "✅";
-        if (std.mem.startsWith(u8, step, "Cleanup")) return "🧹";
-        if (std.mem.startsWith(u8, step, "Brew")) return "🍺";
-        if (std.mem.startsWith(u8, step, "Post-")) return "🔄";
-        return "• ";
-    } else {
-        if (std.mem.startsWith(u8, step, "Pre-check")) return "[..]";
-        if (std.mem.startsWith(u8, step, "Download")) return "[DL]";
-        if (std.mem.startsWith(u8, step, "Verif")) return "[VF]";
-        if (std.mem.startsWith(u8, step, "Extract")) return "[EX]";
-        if (std.mem.startsWith(u8, step, "Install")) return "[IN]";
-        if (std.mem.startsWith(u8, step, "Status")) return "[PI]";
-        if (std.mem.startsWith(u8, step, "Shell")) return "[SH]";
-        if (std.mem.startsWith(u8, step, "Config")) return "[CF]";
-        if (std.mem.startsWith(u8, step, "Link")) return "[LK]";
-        if (std.mem.startsWith(u8, step, "Valid")) return "[OK]";
-        if (std.mem.startsWith(u8, step, "Cleanup")) return "[CL]";
-        if (std.mem.startsWith(u8, step, "Brew")) return "[BR]";
-        if (std.mem.startsWith(u8, step, "Post-")) return "[PO]";
-        return "[--]";
-    }
-}
-
-fn stepPrefix(step: []const u8) []const u8 {
-    return stepPrefixForMode(step, render_mode);
-}
+// ─── Step lines — brew style ─────────────────────────────────────────────────
+// Every step is a "==> Step  detail" line. No emoji prefixes, no status symbols
+// on success. Failures get a red prefix. The download spinner is a separate
+// indented line managed by progress.zig — not a step line.
 
 pub fn printStep(step: []const u8, status: []const u8, detail: []const u8) void {
     if (render_mode == .silent) return;
-    const prefix = stepPrefix(step);
-    const color = if (std.mem.eql(u8, status, sym_ok))
-        green
-    else if (std.mem.eql(u8, status, sym_arrow))
-        yellow
-    else if (std.mem.eql(u8, status, sym_fail))
-        red
-    else
-        dim;
-
-    if (detail.len > 0) {
-        std.debug.print("{s} {s}{s:<14}{s}  {s}{s}{s}  {s}\n", .{
-            prefix, bold, step, reset, color, status, reset, detail,
-        });
+    const is_fail = std.mem.eql(u8, status, sym_fail);
+    if (is_fail) {
+        if (detail.len > 0) {
+            std.debug.print("{s}==>{s} {s}Error:{s} {s} {s}\n", .{ red, reset, bold, reset, step, detail });
+        } else {
+            std.debug.print("{s}==>{s} {s}Error:{s} {s}\n", .{ red, reset, bold, reset, step });
+        }
     } else {
-        std.debug.print("{s} {s}{s:<14}{s}  {s}{s}{s}\n", .{
-            prefix, bold, step, reset, color, status, reset,
-        });
+        if (detail.len > 0) {
+            std.debug.print("{s}==>{s} {s}{s}{s} {s}\n", .{ cyan, reset, bold, step, reset, detail });
+        } else {
+            std.debug.print("{s}==>{s} {s}{s}{s}\n", .{ cyan, reset, bold, step, reset });
+        }
     }
 }
 
-/// Print an in-progress step indicator that stays on the current line (no newline).
-/// Follow with printStepDone() to overwrite it with the completed state.
-/// In pipe/silent mode: no-op — printStepDone() will print the single final line.
+/// Same as printStep — in brew style there is no "in-progress" state for
+/// non-download steps; we just print the header immediately.
 pub fn printStepStart(step: []const u8, detail: []const u8) void {
-    if (render_mode == .silent or render_mode == .pipe) return;
-    const prefix = stepPrefix(step);
-    std.debug.print("{s} {s}{s:<14}{s}  {s}…{s}  {s}", .{
-        prefix, bold, step, reset, dim, reset, detail,
-    }); // intentionally no \n — cursor stays on this line
+    printStep(step, sym_ok, detail);
 }
 
-/// Complete a step started with printStepStart(), overwriting the in-progress line.
-/// In pipe mode: prints the step as a normal completed line (no in-progress line was shown).
+/// In brew style, printStepStart already printed the header; this is a no-op.
+/// Kept for call-site compatibility.
 pub fn printStepDone(step: []const u8, detail: []const u8) void {
-    if (render_mode == .silent) return;
-    switch (render_mode) {
-        .rich => std.debug.print("\r\x1b[2K", .{}),
-        .plain => std.debug.print("\r{s:<80}\r", .{""}),
-        .pipe, .silent => {},
-    }
-    printStep(step, sym_ok, detail);
+    _ = step;
+    _ = detail;
 }
 
 // ─── Install progress (called from strategy execute() in tool.zig) ────────────
@@ -232,52 +190,43 @@ pub fn printDetail(msg: []const u8) void {
     std.debug.print("   {s}\n", .{msg});
 }
 
+/// Brew-style section header: "==> <title>" in bold. Used by all commands.
+pub fn printSectionHeader(title: []const u8) void {
+    if (render_mode == .silent) return;
+    std.debug.print("\n{s}==>{s} {s}{s}{s}\n", .{ cyan, reset, bold, title, reset });
+}
+
+pub fn printSectionHeaderFmt(comptime fmt: []const u8, args: anytype) void {
+    if (render_mode == .silent) return;
+    std.debug.print("\n{s}==>{s} {s}", .{ cyan, reset, bold });
+    std.debug.print(fmt, args);
+    std.debug.print("{s}\n", .{reset});
+}
+
+/// Print a "==> Caveats" block with indented lines. Pass a slice of message strings.
+pub fn printCaveats(lines: []const []const u8) void {
+    if (render_mode == .silent or lines.len == 0) return;
+    printSectionHeader("Caveats");
+    for (lines) |line| {
+        std.debug.print("  {s}\n", .{line});
+    }
+}
+
+/// Print the upgrade/install summary line: "==> Summary: X upgraded · Y current · Z failed · Ns"
+pub fn printSummary(upgraded: usize, uptodate: usize, failed: usize, elapsed_ms: u64) void {
+    if (render_mode == .silent) return;
+    const secs = elapsed_ms / 1000;
+    const frac = (elapsed_ms % 1000) / 100;
+    printSectionHeader("Summary");
+    std.debug.print("  {s}{d} upgraded{s}  ·  {d} already current  ·  ", .{
+        green, upgraded, reset, uptodate,
+    });
+    if (failed > 0) {
+        std.debug.print("{s}{d} failed{s}", .{ red, failed, reset });
+    } else {
+        std.debug.print("{s}{d} failed{s}", .{ dim, failed, reset });
+    }
+    std.debug.print("  ·  {d}.{d}s\n", .{ secs, frac });
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
-
-test "stepPrefixForMode: rich mode step names" {
-    try std.testing.expectEqualStrings("🔍", stepPrefixForMode("Pre-checks", .rich));
-    try std.testing.expectEqualStrings("📥", stepPrefixForMode("Downloading", .rich));
-    try std.testing.expectEqualStrings("🔐", stepPrefixForMode("Verifying", .rich));
-    try std.testing.expectEqualStrings("📦", stepPrefixForMode("Extracting", .rich));
-    try std.testing.expectEqualStrings("🔧", stepPrefixForMode("Installation", .rich));
-    try std.testing.expectEqualStrings("📌", stepPrefixForMode("Status", .rich));
-    try std.testing.expectEqualStrings("🐚", stepPrefixForMode("Shell integration", .rich));
-    try std.testing.expectEqualStrings("⚙️ ", stepPrefixForMode("Config", .rich));
-    try std.testing.expectEqualStrings("🔗", stepPrefixForMode("Link", .rich));
-    try std.testing.expectEqualStrings("✅", stepPrefixForMode("Validation", .rich));
-    try std.testing.expectEqualStrings("🧹", stepPrefixForMode("Cleanup", .rich));
-    try std.testing.expectEqualStrings("🍺", stepPrefixForMode("Brew", .rich));
-    try std.testing.expectEqualStrings("🔄", stepPrefixForMode("Post-install", .rich));
-    try std.testing.expectEqualStrings("• ", stepPrefixForMode("Unknown step", .rich));
-}
-
-test "stepPrefixForMode: plain mode step names" {
-    try std.testing.expectEqualStrings("[..]", stepPrefixForMode("Pre-checks", .plain));
-    try std.testing.expectEqualStrings("[DL]", stepPrefixForMode("Downloading", .plain));
-    try std.testing.expectEqualStrings("[VF]", stepPrefixForMode("Verifying", .plain));
-    try std.testing.expectEqualStrings("[EX]", stepPrefixForMode("Extracting", .plain));
-    try std.testing.expectEqualStrings("[IN]", stepPrefixForMode("Installation", .plain));
-    try std.testing.expectEqualStrings("[PI]", stepPrefixForMode("Status", .plain));
-    try std.testing.expectEqualStrings("[SH]", stepPrefixForMode("Shell integration", .plain));
-    try std.testing.expectEqualStrings("[CF]", stepPrefixForMode("Config", .plain));
-    try std.testing.expectEqualStrings("[LK]", stepPrefixForMode("Link", .plain));
-    try std.testing.expectEqualStrings("[OK]", stepPrefixForMode("Validation", .plain));
-    try std.testing.expectEqualStrings("[CL]", stepPrefixForMode("Cleanup", .plain));
-    try std.testing.expectEqualStrings("[BR]", stepPrefixForMode("Brew", .plain));
-    try std.testing.expectEqualStrings("[PO]", stepPrefixForMode("Post-install", .plain));
-    try std.testing.expectEqualStrings("[--]", stepPrefixForMode("Unknown step", .plain));
-}
-
-test "stepPrefixForMode: pipe mode uses same prefixes as plain" {
-    // Pipe mode has no TTY so must not emit emoji
-    try std.testing.expectEqualStrings("[DL]", stepPrefixForMode("Downloading", .pipe));
-    try std.testing.expectEqualStrings("[IN]", stepPrefixForMode("Installation", .pipe));
-    try std.testing.expectEqualStrings("[--]", stepPrefixForMode("Unknown", .pipe));
-}
-
-test "stepPrefixForMode: prefix matching is prefix not exact" {
-    // Verifies we match on startsWith, not equality
-    try std.testing.expectEqualStrings("📥", stepPrefixForMode("Downloading helm", .rich));
-    try std.testing.expectEqualStrings("[DL]", stepPrefixForMode("Downloading helm", .plain));
-    try std.testing.expectEqualStrings("🔧", stepPrefixForMode("Installation complete", .rich));
-}

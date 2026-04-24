@@ -2,12 +2,17 @@ const std = @import("std");
 const state_mod = @import("state.zig");
 const install_cmd = @import("cmd/install.zig");
 const list_cmd = @import("cmd/list.zig");
-const status_cmd = @import("cmd/status.zig");
 const doctor_cmd = @import("cmd/doctor.zig");
 const upgrade_cmd = @import("cmd/upgrade.zig");
 const update_cmd = @import("cmd/update.zig");
 const uninstall_cmd = @import("cmd/uninstall.zig");
 const repository_cmd = @import("cmd/repository.zig");
+const info_cmd = @import("cmd/info.zig");
+const search_cmd = @import("cmd/search.zig");
+const outdated_cmd = @import("cmd/outdated.zig");
+const groups_cmd = @import("cmd/groups.zig");
+const pin_cmd = @import("cmd/pin.zig");
+const unpin_cmd = @import("cmd/unpin.zig");
 const output = @import("ui/output.zig");
 const repo = @import("repository/loader.zig");
 const tool_mod = @import("tool.zig");
@@ -16,29 +21,28 @@ const version = @import("version.zig");
 const version_str = "dot version " ++ version.current ++ "\n";
 
 const help =
-    \\
-    \\+--------------------------------------------------+
-    \\|  dot — DevOps Toolbox v0.1.0                     |
-    \\+--------------------------------------------------+
-    \\
     \\Usage: dot <command> [options]
     \\
     \\Commands:
-    \\  install     Install a tool or group of tools
-    \\  uninstall   Remove a tool
-    \\  upgrade     Upgrade installed tools
-    \\  update      Update dot itself to the latest release
-    \\  list        List available tools
-    \\  status      Show installed tools and versions
     \\  doctor      Check system health
+    \\  groups      List all tool groups
+    \\  info        Show detailed info about a tool
+    \\  install     Install a tool or group of tools
+    \\  list        List available tools
+    \\  outdated    List installed tools with updates available
+    \\  pin         Pin a tool to prevent automatic upgrades
     \\  repository  Manage external repositories
-    \\
-    \\Use 'dot <command> --help' for command-specific options and examples.
+    \\  search      Search tools by name or description
+    \\  uninstall   Remove a tool
+    \\  unpin       Unpin a tool to resume automatic upgrades
+    \\  update      Update dot itself to the latest release
+    \\  upgrade     Upgrade installed tools
     \\
     \\Options:
     \\  --version, -v    Show version
     \\  --help, -h       Show this help
     \\
+    \\Run 'dot <command> --help' for more information on a specific command.
     \\
 ;
 
@@ -71,12 +75,6 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
     const args = rest.items;
 
     // Commands that don't need the tool repository
-    if (std.mem.eql(u8, command, "status")) {
-        var state = try state_mod.State.init(allocator);
-        defer state.deinit();
-        return status_cmd.run(allocator, args, &state);
-    }
-
     if (std.mem.eql(u8, command, "repository")) {
         var state = try state_mod.State.init(allocator);
         defer state.deinit();
@@ -87,6 +85,18 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
         var state = try state_mod.State.init(allocator);
         defer state.deinit();
         return update_cmd.run(allocator, args, &state);
+    }
+
+    if (std.mem.eql(u8, command, "pin")) {
+        var state = try state_mod.State.init(allocator);
+        defer state.deinit();
+        return pin_cmd.run(allocator, args, &state);
+    }
+
+    if (std.mem.eql(u8, command, "unpin")) {
+        var state = try state_mod.State.init(allocator);
+        defer state.deinit();
+        return unpin_cmd.run(allocator, args, &state);
     }
 
     // Commands that need the merged tool list (builtins + external)
@@ -111,6 +121,26 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
         return list_cmd.run(allocator, args, &state, tools);
     }
 
+    if (std.mem.eql(u8, command, "info")) {
+        var state = try state_mod.State.init(allocator);
+        defer state.deinit();
+        return info_cmd.run(allocator, args, &state, tools);
+    }
+
+    if (std.mem.eql(u8, command, "search")) {
+        return search_cmd.run(allocator, args, tools);
+    }
+
+    if (std.mem.eql(u8, command, "outdated")) {
+        var state = try state_mod.State.init(allocator);
+        defer state.deinit();
+        return outdated_cmd.run(allocator, args, &state, tools);
+    }
+
+    if (std.mem.eql(u8, command, "groups")) {
+        return groups_cmd.run(allocator, args, tools);
+    }
+
     if (std.mem.eql(u8, command, "install")) {
         var state = try state_mod.State.init(allocator);
         defer state.deinit();
@@ -130,7 +160,7 @@ pub fn run(allocator: std.mem.Allocator, argv: [][:0]u8) !void {
     }
 
     // Suggest the closest known command if the edit distance is small enough.
-    const known = [_][]const u8{ "list", "install", "uninstall", "status", "upgrade", "update", "doctor", "repository" };
+    const known = [_][]const u8{ "list", "install", "uninstall", "upgrade", "update", "doctor", "repository", "info", "search", "outdated", "groups", "pin", "unpin" };
     var best_dist: usize = std.math.maxInt(usize);
     var best_cmd: []const u8 = "";
     for (known) |known_cmd| {
