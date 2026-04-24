@@ -411,6 +411,10 @@ fn parseVersionSource(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.V
         return .{ .static = .{ .version = try arena.dupe(u8, ver.string) } };
     } else if (std.mem.eql(u8, type_str, "gcloud_sdk")) {
         return .{ .gcloud_sdk = {} };
+    } else if (std.mem.eql(u8, type_str, "ziglang")) {
+        return .{ .ziglang = {} };
+    } else if (std.mem.eql(u8, type_str, "go_dl")) {
+        return .{ .go_dl = {} };
     } else if (std.mem.eql(u8, type_str, "github_tags")) {
         const repo_val = obj.get("repo") orelse return error.MissingRepo;
         if (repo_val != .string) return error.InvalidRepo;
@@ -492,6 +496,7 @@ fn parseStrategy(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.Instal
         const bin_rel = if (obj.get("binary_rel_path")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null;
         const script = if (obj.get("install_script")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null;
         const sdk_dir = if (obj.get("sdk_dir")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null;
+        const sdk_name = if (obj.get("sdk_name")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null;
         const script_args = if (obj.get("install_script_args")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null;
         const symlinks: []const []const u8 = if (obj.get("symlinks")) |sv| blk: {
             if (sv != .array) break :blk &.{};
@@ -508,6 +513,7 @@ fn parseStrategy(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.Instal
             .binary_rel_path = bin_rel,
             .install_script = script,
             .sdk_dir = sdk_dir,
+            .sdk_name = sdk_name,
             .install_script_args = script_args,
             .symlinks = symlinks,
         } };
@@ -525,6 +531,7 @@ fn parseGroupStr(name: []const u8) ?tool.Group {
     if (std.mem.eql(u8, name, "terminal")) return .terminal;
     if (std.mem.eql(u8, name, "cm")) return .cm;
     if (std.mem.eql(u8, name, "security")) return .security;
+    if (std.mem.eql(u8, name, "dev")) return .dev;
     return null;
 }
 
@@ -608,5 +615,5 @@ test "builtin_repo_bytes: parses all built-in tools" {
     var arena_inst = std.heap.ArenaAllocator.init(alloc);
     defer arena_inst.deinit();
     const tools = try parseRepositoryJson(arena_inst.allocator(), alloc, builtin_repo_bytes);
-    try std.testing.expectEqual(@as(usize, 28), tools.len);
+    try std.testing.expectEqual(@as(usize, 30), tools.len);
 }

@@ -17,7 +17,7 @@ const help =
     \\  --details, -l     Show version/installed/method columns (installed tools only)
     \\  --help, -h        Show this help
     \\
-    \\Groups:  k8s, cloud, iac, containers, utils, terminal, cm, security, all
+    \\Groups:  k8s, cloud, iac, containers, utils, terminal, cm, security, dev, all
     \\
     \\Examples:
     \\  dot list
@@ -99,7 +99,7 @@ pub fn run(
     const parsed = parseListArgs(args);
 
     if (parsed.unknown_group) |ug| {
-        output.printFmt("Unknown group '{s}'. Valid groups: k8s, cloud, iac, containers, utils, terminal, cm, security\n", .{ug});
+        output.printFmt("Unknown group '{s}'. Valid groups: k8s, cloud, iac, containers, utils, terminal, cm, security, dev\n", .{ug});
         return;
     }
 

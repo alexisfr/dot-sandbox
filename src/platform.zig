@@ -33,6 +33,14 @@ pub const OperatingSystem = enum {
             .macos => "darwin-amd64",
         };
     }
+
+    /// OS name as used by ziglang.org downloads: "linux" or "macos".
+    pub fn zigName(self: OperatingSystem) []const u8 {
+        return switch (self) {
+            .linux => "linux",
+            .macos => "macos",
+        };
+    }
 };
 
 pub const Arch = enum {

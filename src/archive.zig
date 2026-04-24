@@ -20,6 +20,20 @@ pub fn extractTarGz(archive_path: []const u8, dest_path: []const u8, strip_compo
     });
 }
 
+/// Extract a .tar.xz archive using system `tar`. Preserves permissions and symlinks.
+pub fn extractTarXz(archive_path: []const u8, dest_path: []const u8, strip_components: u32, allocator: std.mem.Allocator) !void {
+    try std.fs.cwd().makePath(dest_path);
+    var strip_buf: [16]u8 = undefined;
+    const strip_str = std.fmt.bufPrint(&strip_buf, "{d}", .{strip_components}) catch "0";
+    const result = try std.process.Child.run(.{
+        .allocator = allocator,
+        .argv = &.{ "tar", "-xJf", archive_path, "-C", dest_path, "--strip-components", strip_str },
+    });
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
+    if (result.term != .Exited or result.term.Exited != 0) return error.ExtractionFailed;
+}
+
 /// Extract a .zip archive to a destination directory using system `unzip`.
 /// Using the system unzip preserves Unix file permissions stored in the archive.
 pub fn extractZip(archive_path: []const u8, dest_path: []const u8, allocator: std.mem.Allocator) !void {

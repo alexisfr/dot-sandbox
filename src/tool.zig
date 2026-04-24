@@ -4,7 +4,7 @@ const platform = @import("platform.zig");
 const archive = @import("archive.zig");
 const output = @import("ui/output.zig");
 
-pub const Group = enum { k8s, cloud, iac, containers, utils, terminal, cm, security };
+pub const Group = enum { k8s, cloud, iac, containers, utils, terminal, cm, security, dev };
 
 // ─── Version resolution ───────────────────────────────────────────────────────
 
@@ -16,6 +16,8 @@ pub const VersionSource = union(enum) {
     static: Static,
     gcloud_sdk: void,
     github_tags: GithubRelease,
+    ziglang: void,
+    go_dl: void,
 
     pub const GithubRelease = struct {
         repo: []const u8,
@@ -51,6 +53,8 @@ pub const VersionSource = union(enum) {
             .static => |s| allocator.dupe(u8, s.version),
             .gcloud_sdk => resolveGcloudSdk(allocator),
             .github_tags => |gh| resolveGithubTags(allocator, gh),
+            .ziglang => resolveZiglang(allocator),
+            .go_dl => resolveGoDl(allocator),
         };
     }
 
@@ -202,6 +206,52 @@ pub const VersionSource = union(enum) {
         }
         return error.VersionNotFound;
     }
+
+    fn resolveZiglang(allocator: std.mem.Allocator) ![]u8 {
+        const body = http.get(allocator, "https://ziglang.org/download/index.json") catch
+            return error.VersionFetchFailed;
+        defer allocator.free(body);
+
+        const parsed = std.json.parseFromSlice(std.json.Value, allocator, body, .{}) catch
+            return error.VersionParseFailed;
+        defer parsed.deinit();
+
+        if (parsed.value != .object) return error.VersionParseFailed;
+        var it = parsed.value.object.iterator();
+        while (it.next()) |entry| {
+            if (std.mem.eql(u8, entry.key_ptr.*, "master")) continue;
+            return allocator.dupe(u8, entry.key_ptr.*);
+        }
+        return error.VersionNotFound;
+    }
+
+    fn resolveGoDl(allocator: std.mem.Allocator) ![]u8 {
+        const body = http.get(allocator, "https://go.dev/dl/?mode=json") catch
+            return error.VersionFetchFailed;
+        defer allocator.free(body);
+
+        const Entry = struct {
+            version: []const u8 = "",
+            stable: bool = false,
+        };
+        const parsed = std.json.parseFromSlice(
+            []Entry,
+            allocator,
+            body,
+            .{ .ignore_unknown_fields = true },
+        ) catch return error.VersionParseFailed;
+        defer parsed.deinit();
+
+        for (parsed.value) |entry| {
+            if (!entry.stable) continue;
+            const ver = if (std.mem.startsWith(u8, entry.version, "go"))
+                entry.version["go".len..]
+            else
+                entry.version;
+            return allocator.dupe(u8, ver);
+        }
+        return error.VersionNotFound;
+    }
 };
 
 // ─── Install strategies ───────────────────────────────────────────────────────
@@ -261,6 +311,8 @@ pub const InstallStrategy = union(enum) {
                 std.mem.endsWith(u8, archive_path, ".tgz"))
             {
                 try archive.extractTarGz(archive_path, extract_dir, 0);
+            } else if (std.mem.endsWith(u8, archive_path, ".tar.xz")) {
+                try archive.extractTarXz(archive_path, extract_dir, 0, ctx.allocator);
             } else if (std.mem.endsWith(u8, archive_path, ".zip")) {
                 try archive.extractZip(archive_path, extract_dir, ctx.allocator);
             }
@@ -473,10 +525,14 @@ pub const InstallStrategy = union(enum) {
         binary_rel_path: ?[]const u8 = null,
         /// If non-null, run this script relative to the effective_dir instead
         install_script: ?[]const u8 = null,
-        /// If set, after extraction the subdirectory named `sdk_dir` inside the extract dir
-        /// is moved to ~/.local/opt/<sdk_dir>. The install_script (if any) is run from that
-        /// persistent directory, not from the temp extract dir. Useful for SDKs like gcloud.
+        /// If set, after extraction the subdirectory matching `sdk_dir` (supports {version},
+        /// {os_zig}, {arch_uname} etc.) inside the extract dir is moved to
+        /// ~/.local/opt/<sdk_name>. The install_script (if any) is run from that persistent
+        /// directory. Useful for SDKs like gcloud or zig.
         sdk_dir: ?[]const u8 = null,
+        /// Name of the directory under ~/.local/opt/ to install into. Defaults to sdk_dir
+        /// when sdk_dir is a simple name, required when sdk_dir contains template variables.
+        sdk_name: ?[]const u8 = null,
         /// Arguments for install_script, space-separated. Supports {bin_dir} and {opt_dir}
         /// placeholders, where {opt_dir} = ~/.local/opt/<tool-id>.
         install_script_args: ?[]const u8 = null,
@@ -501,14 +557,21 @@ pub const InstallStrategy = union(enum) {
                 std.mem.endsWith(u8, archive_path, ".tgz"))
             {
                 try archive.extractTarGz(archive_path, extract_dir, self.strip_components);
+            } else if (std.mem.endsWith(u8, archive_path, ".tar.xz")) {
+                try archive.extractTarXz(archive_path, extract_dir, self.strip_components, ctx.allocator);
             } else if (std.mem.endsWith(u8, archive_path, ".zip")) {
                 try archive.extractZip(archive_path, extract_dir, ctx.allocator);
             }
 
             // Determine the working directory: either a persistent SDK dir or the temp extract dir
             const home = std.posix.getenv("HOME") orelse "/tmp";
-            const effective_dir: []const u8 = if (self.sdk_dir) |sd| blk: {
-                const sdk_path = try std.fs.path.join(ctx.allocator, &.{ home, ".local", "opt", sd });
+            const effective_dir: []const u8 = if (self.sdk_dir) |sd_tmpl| blk: {
+                // sdk_dir supports template variables (e.g. zig uses version in dir name)
+                const sd = try renderTemplate(ctx.allocator, sd_tmpl, ctx);
+                defer ctx.allocator.free(sd);
+                // sdk_name is the fixed install dir name; falls back to sdk_dir if simple
+                const install_name = self.sdk_name orelse sd;
+                const sdk_path = try std.fs.path.join(ctx.allocator, &.{ home, ".local", "opt", install_name });
                 // Remove old installation and move new one into place
                 std.fs.cwd().deleteTree(sdk_path) catch {};
                 const src = try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ extract_dir, sd });
@@ -685,6 +748,8 @@ pub fn renderTemplate(allocator: std.mem.Allocator, tmpl: []const u8, ctx: *cons
                 ctx.architecture.altName()
             else if (std.mem.eql(u8, key, "os_title"))
                 ctx.operating_system.titleName()
+            else if (std.mem.eql(u8, key, "os_zig"))
+                ctx.operating_system.zigName()
             else
                 tmpl[i .. i + end + 1]; // keep unchanged
 

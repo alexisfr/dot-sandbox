@@ -650,6 +650,43 @@
                 "zsh_cmd": "source <(trivy completion zsh)",
                 "fish_cmd": "trivy completion fish | source"
             }
+        },
+        {
+            "id": "zig",
+            "name": "Zig",
+            "description": "General-purpose programming language and toolchain",
+            "groups": [
+                "dev"
+            ],
+            "homepage": "https://ziglang.org",
+            "version_source": {
+                "type": "ziglang"
+            },
+            "strategy": {
+                "type": "tarball",
+                "url_template": "https://ziglang.org/download/{version}/zig-{arch_uname}-{os_zig}-{version}.tar.xz",
+                "sdk_dir": "zig-{arch_uname}-{os_zig}-{version}",
+                "sdk_name": "zig",
+                "symlinks": ["zig"]
+            }
+        },
+        {
+            "id": "go",
+            "name": "Go",
+            "description": "Open source programming language by Google",
+            "groups": [
+                "dev"
+            ],
+            "homepage": "https://go.dev",
+            "version_source": {
+                "type": "go_dl"
+            },
+            "strategy": {
+                "type": "tarball",
+                "url_template": "https://go.dev/dl/go{version}.{os}-{arch}.tar.gz",
+                "sdk_dir": "go",
+                "symlinks": ["bin/go", "bin/gofmt"]
+            }
         }
     ]
 }

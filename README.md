@@ -71,6 +71,7 @@ dot doctor                  # health check — shell integration, PATH, completi
 | `security`   | trivy, vault                                      |
 | `utils`      | jq, yq, tldr                                      |
 | `terminal`   | starship, btop                                    |
+| `dev`        | zig, go                                           |
 | `all`        | everything above                                  |
 
 ## Shell integration

@@ -502,6 +502,7 @@ pub fn parseGroup(name: []const u8) ?tool_mod.Group {
     if (std.mem.eql(u8, name, "terminal")) return .terminal;
     if (std.mem.eql(u8, name, "cm")) return .cm;
     if (std.mem.eql(u8, name, "security")) return .security;
+    if (std.mem.eql(u8, name, "dev")) return .dev;
     return null;
 }
 
@@ -662,6 +663,7 @@ test "parseGroup: known groups" {
     try std.testing.expectEqual(tool_mod.Group.containers, parseGroup("containers").?);
     try std.testing.expectEqual(tool_mod.Group.utils, parseGroup("utils").?);
     try std.testing.expectEqual(tool_mod.Group.terminal, parseGroup("terminal").?);
+    try std.testing.expectEqual(tool_mod.Group.dev, parseGroup("dev").?);
 }
 
 test "parseGroup: unknown groups return null" {
