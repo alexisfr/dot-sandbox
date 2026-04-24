@@ -129,6 +129,43 @@
             }
         },
         {
+            "id": "krr",
+            "name": "Robusta KRR",
+            "description": "Prometheus-based Kubernetes resource recommendations for CPU and memory",
+            "groups": [
+                "k8s"
+            ],
+            "homepage": "https://github.com/robusta-dev/krr",
+            "version_source": {
+                "type": "github_release",
+                "repo": "robusta-dev/krr"
+            },
+            "strategy": {
+                "type": "tarball",
+                "url_template": "https://github.com/robusta-dev/krr/releases/download/v{version}/krr-ubuntu-latest-v{version}.zip",
+                "sdk_dir": "krr",
+                "symlinks": ["krr"]
+            }
+        },
+        {
+            "id": "kubeseal",
+            "name": "kubeseal",
+            "description": "Encrypt Kubernetes secrets into SealedSecrets safe for GitOps storage",
+            "groups": [
+                "k8s"
+            ],
+            "homepage": "https://github.com/bitnami-labs/sealed-secrets",
+            "version_source": {
+                "type": "github_release",
+                "repo": "bitnami-labs/sealed-secrets"
+            },
+            "strategy": {
+                "type": "github_release",
+                "url_template": "https://github.com/bitnami-labs/sealed-secrets/releases/download/v{version}/kubeseal-{version}-{os}-{arch}.tar.gz",
+                "binary_in_archive": "kubeseal"
+            }
+        },
+        {
             "id": "tflint",
             "name": "tflint",
             "description": "A pluggable Terraform linter",

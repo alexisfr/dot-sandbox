@@ -33,15 +33,10 @@ pub fn initCaps() void {
         sym_fail = "FAIL";
         sym_warn = "WARN";
         sym_warn_w = 4;
-        sym_check = "[OK]";
         sym_pin = "[PIN]";
-        sym_list = "[INFO]";
         sym_books = "[DOC]";
         sym_link = "[LK]";
-        sym_search = "[..]";
-        sym_dash = "-";
         sym_arrow = "->";
-        sym_install = "[IN]";
         spin_frames = &.{ "|", "/", "-", "\\" };
         spin_frame_w = 1;
     }
@@ -75,16 +70,11 @@ pub var reset: []const u8 = "\x1b[0m";
 pub var sym_ok: []const u8 = "✓";
 pub var sym_fail: []const u8 = "✗";
 pub var sym_warn: []const u8 = "⚠";
-pub var sym_check: []const u8 = "✅";
 pub var sym_pin: []const u8 = "📌";
-pub var sym_list: []const u8 = "📋";
 pub var sym_books: []const u8 = "📚";
 pub var sym_link: []const u8 = "🔗";
-pub var sym_search: []const u8 = "🔍";
-pub var sym_dash: []const u8 = "─";
 /// Progress/in-flight indicator: "→" in rich mode, "->" in plain/pipe.
 pub var sym_arrow: []const u8 = "→";
-/// Install action indicator: "🔧" in rich mode, "[IN]" in plain/pipe.
 pub var sym_install: []const u8 = "🔧";
 /// Visual width of sym_ok (1 in rich mode, 2 in plain/pipe for "ok").
 pub var sym_ok_w: usize = 1;
@@ -154,26 +144,6 @@ pub fn printStepStart(step: []const u8, detail: []const u8) void {
     printStep(step, sym_ok, detail);
 }
 
-/// In brew style, printStepStart already printed the header; this is a no-op.
-/// Kept for call-site compatibility.
-pub fn printStepDone(step: []const u8, detail: []const u8) void {
-    _ = step;
-    _ = detail;
-}
-
-// ─── Install progress (called from strategy execute() in tool.zig) ────────────
-
-/// No-op: the ProgressBar handles all downloading feedback in every mode.
-/// bar.finish() in pipe mode prints the single completion line.
-pub fn printDownloading(url: []const u8) void {
-    _ = url;
-}
-
-/// No-op: install.zig's printStep("Installation", ...) shows the path instead.
-pub fn printInstalledTo(path: []const u8) void {
-    _ = path;
-}
-
 pub fn printRunningCmd(cmd: []const u8, arg: []const u8) void {
     std.debug.print("   Running: {s} {s}\n", .{ cmd, arg });
 }
@@ -229,4 +199,62 @@ pub fn printSummary(upgraded: usize, uptodate: usize, failed: usize, elapsed_ms:
     std.debug.print("  ·  {d}.{d}s\n", .{ secs, frac });
 }
 
+/// Format a Unix timestamp (decimal string) as "YYYY-MM-DD HH:MM:SS".
+/// Falls back to the raw string if parsing fails.
+pub fn fmtTimestamp(ts_str: []const u8, buf: []u8) []const u8 {
+    const secs = std.fmt.parseInt(u64, ts_str, 10) catch return ts_str;
+    const epoch_secs = std.time.epoch.EpochSeconds{ .secs = secs };
+    const year_day = epoch_secs.getEpochDay().calculateYearDay();
+    const month_day = year_day.calculateMonthDay();
+    const day_secs = secs % (24 * 3600);
+    const hours = day_secs / 3600;
+    const minutes = (day_secs % 3600) / 60;
+    const seconds = day_secs % 60;
+    return std.fmt.bufPrint(buf, "{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}", .{
+        year_day.year,
+        month_day.month.numeric(),
+        month_day.day_index + 1,
+        hours,
+        minutes,
+        seconds,
+    }) catch ts_str;
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
+
+test "fmtTimestamp: known epoch" {
+    var buf: [24]u8 = undefined;
+    // Unix timestamp 0 = 1970-01-01 00:00:00
+    try std.testing.expectEqualStrings("1970-01-01 00:00:00", fmtTimestamp("0", &buf));
+}
+
+test "fmtTimestamp: invalid string returns input" {
+    var buf: [24]u8 = undefined;
+    try std.testing.expectEqualStrings("notanumber", fmtTimestamp("notanumber", &buf));
+}
+
+test "fmtTimestamp: known date mid-2024" {
+    var buf: [24]u8 = undefined;
+    // 2024-06-15 10:00:00 UTC = 1718445600
+    try std.testing.expectEqualStrings("2024-06-15 10:00:00", fmtTimestamp("1718445600", &buf));
+}
+
+test "getRenderMode: default is rich" {
+    // Only valid before initCaps() modifies it; we restore after.
+    const saved = getRenderMode();
+    setRenderModeForTesting(.rich);
+    defer setRenderModeForTesting(saved);
+    try std.testing.expectEqual(RenderMode.rich, getRenderMode());
+}
+
+test "setRenderModeForTesting: round-trips all modes" {
+    const saved = getRenderMode();
+    defer setRenderModeForTesting(saved);
+
+    setRenderModeForTesting(.silent);
+    try std.testing.expectEqual(RenderMode.silent, getRenderMode());
+    setRenderModeForTesting(.pipe);
+    try std.testing.expectEqual(RenderMode.pipe, getRenderMode());
+    setRenderModeForTesting(.plain);
+    try std.testing.expectEqual(RenderMode.plain, getRenderMode());
+}

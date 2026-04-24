@@ -115,18 +115,6 @@ pub const Shell = enum {
         };
     }
 
-    /// Path to main shell RC file
-    pub fn rcFile(self: Shell) ?[]const u8 {
-        const home = std.posix.getenv("HOME") orelse return null;
-        _ = home;
-        return switch (self) {
-            .bash => "~/.bashrc",
-            .zsh => "~/.zshrc",
-            .fish => "~/.config/fish/config.fish",
-            .unknown => null,
-        };
-    }
-
     /// Name of centralized integration file
     pub fn integrationFileName(self: Shell) []const u8 {
         return switch (self) {

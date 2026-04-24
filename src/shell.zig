@@ -253,18 +253,8 @@ fn normalizeBlankLines(allocator: std.mem.Allocator, content: []const u8) ![]u8 
 }
 
 fn buildSourceLine(shell: platform.Shell, integration_path: []const u8, allocator: std.mem.Allocator) ![]u8 {
-    return switch (shell) {
-        .fish => std.fmt.allocPrint(
-            allocator,
-            "\n{s}\nsource {s}\n",
-            .{ source_marker, integration_path },
-        ),
-        else => std.fmt.allocPrint(
-            allocator,
-            "\n{s}\nsource {s}\n",
-            .{ source_marker, integration_path },
-        ),
-    };
+    _ = shell;
+    return std.fmt.allocPrint(allocator, "\n{s}\nsource {s}\n", .{ source_marker, integration_path });
 }
 
 fn ensurePathInIntegration(

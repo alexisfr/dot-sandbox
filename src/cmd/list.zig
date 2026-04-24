@@ -3,6 +3,7 @@ const builtin = @import("builtin");
 const tool_mod = @import("../tool.zig");
 const state_mod = @import("../state.zig");
 const output = @import("../ui/output.zig");
+const install_cmd = @import("install.zig");
 
 const help =
     \\Usage: dot list [options]
@@ -20,6 +21,7 @@ const help =
     \\
     \\Examples:
     \\  dot list
+    \\  dot list k8s
     \\  dot list --group k8s
     \\  dot list --installed
     \\  dot list --installed --details
@@ -45,6 +47,42 @@ fn getTermWidth() usize {
     return 80;
 }
 
+pub const ListArgs = struct {
+    group_filter: ?tool_mod.Group = null,
+    installed_only: bool = false,
+    pinned_only: bool = false,
+    details_mode: bool = false,
+    /// Set when a positional argument is not a valid group name.
+    unknown_group: ?[]const u8 = null,
+};
+
+pub fn parseListArgs(args: []const []const u8) ListArgs {
+    var result = ListArgs{};
+    var idx: usize = 0;
+    while (idx < args.len) : (idx += 1) {
+        const arg = args[idx];
+        if (std.mem.eql(u8, arg, "--group") or std.mem.eql(u8, arg, "-g")) {
+            idx += 1;
+            if (idx < args.len) result.group_filter = install_cmd.parseGroup(args[idx]);
+        } else if (std.mem.eql(u8, arg, "--installed") or std.mem.eql(u8, arg, "-i")) {
+            result.installed_only = true;
+        } else if (std.mem.eql(u8, arg, "--pinned")) {
+            result.pinned_only = true;
+            result.installed_only = true;
+        } else if (std.mem.eql(u8, arg, "--details") or std.mem.eql(u8, arg, "-l")) {
+            result.details_mode = true;
+            result.installed_only = true;
+        } else if (!std.mem.startsWith(u8, arg, "-")) {
+            if (install_cmd.parseGroup(arg)) |g| {
+                result.group_filter = g;
+            } else {
+                result.unknown_group = arg;
+            }
+        }
+    }
+    return result;
+}
+
 pub fn run(
     allocator: std.mem.Allocator,
     args: []const []const u8,
@@ -58,27 +96,17 @@ pub fn run(
         }
     }
 
-    var group_filter: ?tool_mod.Group = null;
-    var installed_only = false;
-    var pinned_only = false;
-    var details_mode = false;
+    const parsed = parseListArgs(args);
 
-    var arg_idx: usize = 0;
-    while (arg_idx < args.len) : (arg_idx += 1) {
-        const arg = args[arg_idx];
-        if (std.mem.eql(u8, arg, "--group") or std.mem.eql(u8, arg, "-g")) {
-            arg_idx += 1;
-            if (arg_idx < args.len) group_filter = parseGroup(args[arg_idx]);
-        } else if (std.mem.eql(u8, arg, "--installed") or std.mem.eql(u8, arg, "-i")) {
-            installed_only = true;
-        } else if (std.mem.eql(u8, arg, "--pinned")) {
-            pinned_only = true;
-            installed_only = true; // pinned implies installed
-        } else if (std.mem.eql(u8, arg, "--details") or std.mem.eql(u8, arg, "-l")) {
-            details_mode = true;
-            installed_only = true; // details implies installed
-        }
+    if (parsed.unknown_group) |ug| {
+        output.printFmt("Unknown group '{s}'. Valid groups: k8s, cloud, iac, containers, utils, terminal, cm, security\n", .{ug});
+        return;
     }
+
+    const group_filter = parsed.group_filter;
+    const installed_only = parsed.installed_only;
+    const pinned_only = parsed.pinned_only;
+    const details_mode = parsed.details_mode;
 
     const term_width = getTermWidth();
     const desc_width = if (term_width > overhead) term_width - overhead else desc_min;
@@ -132,7 +160,7 @@ pub fn run(
         for (matched.items) |t| {
             const entry = state.tools.get(t.id) orelse continue;
             var date_buf: [24]u8 = undefined;
-            const date = fmtTimestamp(entry.installed_at, &date_buf);
+            const date = output.fmtTimestamp(entry.installed_at, &date_buf);
             const pin_str: []const u8 = if (entry.pinned) output.sym_pin else "";
             printDetailsRow(t.id, entry.version, date, entry.method, pin_str);
         }
@@ -160,24 +188,6 @@ pub fn run(
 
 // ─── List-specific print functions ────────────────────────────────────────────
 
-fn fmtTimestamp(ts_str: []const u8, buf: []u8) []const u8 {
-    const secs = std.fmt.parseInt(u64, ts_str, 10) catch return ts_str;
-    const epoch_secs = std.time.epoch.EpochSeconds{ .secs = secs };
-    const year_day = epoch_secs.getEpochDay().calculateYearDay();
-    const month_day = year_day.calculateMonthDay();
-    const day_secs = secs % (24 * 3600);
-    const hours = day_secs / 3600;
-    const minutes = (day_secs % 3600) / 60;
-    const seconds = day_secs % 60;
-    return std.fmt.bufPrint(buf, "{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}", .{
-        year_day.year,
-        month_day.month.numeric(),
-        month_day.day_index + 1,
-        hours,
-        minutes,
-        seconds,
-    }) catch ts_str;
-}
 
 fn printDetailsHeader(term_width: usize) void {
     _ = term_width;
@@ -329,24 +339,74 @@ test "truncDesc" {
     try std.testing.expectEqual(@as(usize, 5), res4.visual);
 }
 
-test "parseGroup" {
-    try std.testing.expectEqual(@as(?tool_mod.Group, null), parseGroup("all"));
-    try std.testing.expectEqual(@as(?tool_mod.Group, null), parseGroup("unknown"));
-    try std.testing.expectEqual(@as(?tool_mod.Group, .k8s), parseGroup("k8s"));
-    try std.testing.expectEqual(@as(?tool_mod.Group, .cloud), parseGroup("cloud"));
-    try std.testing.expectEqual(@as(?tool_mod.Group, .containers), parseGroup("containers"));
-    try std.testing.expectEqual(@as(?tool_mod.Group, .cm), parseGroup("cm"));
+test "parseListArgs: no args gives defaults" {
+    const r = parseListArgs(&.{});
+    try std.testing.expectEqual(@as(?tool_mod.Group, null), r.group_filter);
+    try std.testing.expect(!r.installed_only);
+    try std.testing.expect(!r.pinned_only);
+    try std.testing.expect(!r.details_mode);
+    try std.testing.expectEqual(@as(?[]const u8, null), r.unknown_group);
 }
 
-fn parseGroup(name: []const u8) ?tool_mod.Group {
-    if (std.mem.eql(u8, name, "all")) return null; // null = no filter = show all
-    if (std.mem.eql(u8, name, "k8s")) return .k8s;
-    if (std.mem.eql(u8, name, "cloud")) return .cloud;
-    if (std.mem.eql(u8, name, "iac")) return .iac;
-    if (std.mem.eql(u8, name, "containers")) return .containers;
-    if (std.mem.eql(u8, name, "utils")) return .utils;
-    if (std.mem.eql(u8, name, "terminal")) return .terminal;
-    if (std.mem.eql(u8, name, "cm")) return .cm;
-    if (std.mem.eql(u8, name, "security")) return .security;
-    return null;
+test "parseListArgs: --group flag" {
+    const r = parseListArgs(&.{ "--group", "k8s" });
+    try std.testing.expectEqual(tool_mod.Group.k8s, r.group_filter.?);
 }
+
+test "parseListArgs: -g shorthand" {
+    const r = parseListArgs(&.{ "-g", "security" });
+    try std.testing.expectEqual(tool_mod.Group.security, r.group_filter.?);
+}
+
+test "parseListArgs: positional group name" {
+    const r = parseListArgs(&.{"k8s"});
+    try std.testing.expectEqual(tool_mod.Group.k8s, r.group_filter.?);
+    try std.testing.expectEqual(@as(?[]const u8, null), r.unknown_group);
+}
+
+test "parseListArgs: positional group security" {
+    const r = parseListArgs(&.{"security"});
+    try std.testing.expectEqual(tool_mod.Group.security, r.group_filter.?);
+}
+
+test "parseListArgs: unknown positional sets unknown_group" {
+    const r = parseListArgs(&.{"badgroup"});
+    try std.testing.expectEqual(@as(?tool_mod.Group, null), r.group_filter);
+    try std.testing.expectEqualStrings("badgroup", r.unknown_group.?);
+}
+
+test "parseListArgs: --installed flag" {
+    const r = parseListArgs(&.{"--installed"});
+    try std.testing.expect(r.installed_only);
+    try std.testing.expect(!r.details_mode);
+}
+
+test "parseListArgs: -i shorthand" {
+    const r = parseListArgs(&.{"-i"});
+    try std.testing.expect(r.installed_only);
+}
+
+test "parseListArgs: --pinned implies installed" {
+    const r = parseListArgs(&.{"--pinned"});
+    try std.testing.expect(r.pinned_only);
+    try std.testing.expect(r.installed_only);
+}
+
+test "parseListArgs: --details implies installed" {
+    const r = parseListArgs(&.{"--details"});
+    try std.testing.expect(r.details_mode);
+    try std.testing.expect(r.installed_only);
+}
+
+test "parseListArgs: -l shorthand implies installed" {
+    const r = parseListArgs(&.{"-l"});
+    try std.testing.expect(r.details_mode);
+    try std.testing.expect(r.installed_only);
+}
+
+test "parseListArgs: positional with flags" {
+    const r = parseListArgs(&.{ "k8s", "--installed" });
+    try std.testing.expectEqual(tool_mod.Group.k8s, r.group_filter.?);
+    try std.testing.expect(r.installed_only);
+}
+

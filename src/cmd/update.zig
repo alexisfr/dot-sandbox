@@ -98,7 +98,7 @@ pub fn run(
     defer allocator.free(archive_path);
 
     // Download the tarball
-    var bar = progress_mod.ProgressBar{ .step = "Downloading" };
+    var bar = progress_mod.ProgressBar{};
     const progress = http.ProgressCallback{ .context = &bar, .func = progressCbFn };
 
     http.download(allocator, url, archive_path, progress) catch |e| {

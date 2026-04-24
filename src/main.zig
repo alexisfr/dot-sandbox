@@ -24,6 +24,7 @@ test {
     _ = @import("archive.zig");
     _ = @import("repository/loader.zig");
     _ = @import("validate.zig");
+    _ = @import("util.zig");
     _ = @import("state.zig");
     _ = @import("shell.zig");
     _ = @import("ui/output.zig");
@@ -33,5 +34,12 @@ test {
     _ = @import("cmd/uninstall.zig");
     _ = @import("cmd/list.zig");
     _ = @import("cmd/repository.zig");
+    _ = @import("cmd/doctor.zig");
+    _ = @import("cmd/groups.zig");
+    _ = @import("cmd/info.zig");
+    _ = @import("cmd/outdated.zig");
+    _ = @import("cmd/search.zig");
+    _ = @import("cmd/pin.zig");
+    _ = @import("cmd/unpin.zig");
     _ = @import("cli.zig");
 }

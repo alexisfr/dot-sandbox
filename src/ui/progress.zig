@@ -9,7 +9,6 @@ const redraw_interval_ms: i64 = 50; // 20 fps max
 /// Call `update(current, total, detail)` each chunk, then `finish()` when done.
 /// finish() is also called automatically from update() the moment current >= total.
 pub const ProgressBar = struct {
-    step: []const u8,
     /// Tracked by update(); used by finish() for pipe-mode summary.
     bytes_done: u64 = 0,
     bytes_total: ?u64 = null,
@@ -134,7 +133,7 @@ test "fmtBytes: megabyte range" {
 test "ProgressBar: update stores bytes" {
     output.setRenderModeForTesting(.silent);
     defer output.setRenderModeForTesting(.rich);
-    var bar = ProgressBar{ .step = "Test" };
+    var bar = ProgressBar{};
     bar.update(1024, 10240, "");
     try std.testing.expectEqual(@as(u64, 1024), bar.bytes_done);
     try std.testing.expectEqual(@as(?u64, 10240), bar.bytes_total);
@@ -144,7 +143,7 @@ test "ProgressBar: update stores bytes" {
 test "ProgressBar: auto-finish triggers at 100%" {
     output.setRenderModeForTesting(.silent);
     defer output.setRenderModeForTesting(.rich);
-    var bar = ProgressBar{ .step = "Test" };
+    var bar = ProgressBar{};
     bar.update(50, 100, "");
     try std.testing.expect(!bar.finished);
     bar.update(100, 100, "");
@@ -154,7 +153,7 @@ test "ProgressBar: auto-finish triggers at 100%" {
 test "ProgressBar: auto-finish triggers when current exceeds total" {
     output.setRenderModeForTesting(.silent);
     defer output.setRenderModeForTesting(.rich);
-    var bar = ProgressBar{ .step = "Test" };
+    var bar = ProgressBar{};
     bar.update(27_000_000, 27_000_000, "");
     try std.testing.expect(bar.finished);
     try std.testing.expectEqual(@as(u64, 27_000_000), bar.bytes_done);
@@ -163,7 +162,7 @@ test "ProgressBar: auto-finish triggers when current exceeds total" {
 test "ProgressBar: update is no-op after finish" {
     output.setRenderModeForTesting(.silent);
     defer output.setRenderModeForTesting(.rich);
-    var bar = ProgressBar{ .step = "Test" };
+    var bar = ProgressBar{};
     bar.update(100, 100, "");
     try std.testing.expect(bar.finished);
     bar.update(200, 200, "");
@@ -173,7 +172,7 @@ test "ProgressBar: update is no-op after finish" {
 test "ProgressBar: explicit finish is idempotent" {
     output.setRenderModeForTesting(.silent);
     defer output.setRenderModeForTesting(.rich);
-    var bar = ProgressBar{ .step = "Test" };
+    var bar = ProgressBar{};
     bar.finish();
     bar.finish();
     try std.testing.expect(bar.finished);
@@ -182,7 +181,7 @@ test "ProgressBar: explicit finish is idempotent" {
 test "ProgressBar: finish without any update leaves rendered=false" {
     output.setRenderModeForTesting(.silent);
     defer output.setRenderModeForTesting(.rich);
-    var bar = ProgressBar{ .step = "Test" };
+    var bar = ProgressBar{};
     try std.testing.expect(!bar.rendered);
     bar.finish();
     try std.testing.expect(!bar.rendered);

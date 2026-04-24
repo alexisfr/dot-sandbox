@@ -5,6 +5,7 @@ const platform = @import("../platform.zig");
 const shell_mod = @import("../shell.zig");
 const output = @import("../ui/output.zig");
 const validate = @import("../validate.zig");
+const util = @import("../util.zig");
 const http = @import("../http.zig");
 const progress_mod = @import("../ui/progress.zig");
 
@@ -233,8 +234,13 @@ fn installTool(
     }
 
     // Check system install (not our ~/.local/bin) — only when dot doesn't already manage this tool.
-    // If dot already owns it (it's in state), the user already resolved the conflict; don't warn again.
-    if (!force and !state.isInstalled(tool.id)) {
+    // Skip for system_package: those tools intentionally install to system paths, so finding
+    // the binary in /usr/bin is expected, not a conflict to warn about.
+    const is_sys_pkg = switch (tool.strategy) {
+        .system_package => true,
+        else => false,
+    };
+    if (!force and !state.isInstalled(tool.id) and !is_sys_pkg) {
         if (checkSystemInstall(allocator, tool.id)) |sys_path| {
             defer allocator.free(sys_path);
             printSkipSystem(tool.name, tool.id, sys_path, "unknown", version);
@@ -288,7 +294,7 @@ fn installTool(
         const dl_step = std.fmt.bufPrint(&dl_buf, "Downloading {s} {s}", .{ tool.name, version }) catch "Downloading";
         output.printStep(dl_step, output.sym_ok, "");
 
-        var bar = progress_mod.ProgressBar{ .step = "Downloading" };
+        var bar = progress_mod.ProgressBar{};
         var ctx = tool_mod.InstallContext{
             .allocator = allocator,
             .tool_id = tool.id,
@@ -566,32 +572,12 @@ pub fn printGroupToolSeparator(name: []const u8, index: usize, total: usize) voi
 
 // ─── Fuzzy match ──────────────────────────────────────────────────────────────
 
-/// Single-row Levenshtein distance. Capped at max_len to bound stack use.
-fn editDistance(a: []const u8, b: []const u8) usize {
-    const max_len = 48;
-    var row: [max_len + 1]usize = undefined;
-    const la = @min(a.len, max_len);
-    const lb = @min(b.len, max_len);
-    for (0..lb + 1) |j| row[j] = j;
-    for (0..la) |i| {
-        var diag = row[0];
-        row[0] = i + 1;
-        for (0..lb) |j| {
-            const above = row[j + 1];
-            const cost: usize = if (a[i] == b[j]) 0 else 1;
-            row[j + 1] = @min(row[j] + 1, @min(above + 1, diag + cost));
-            diag = above;
-        }
-    }
-    return row[lb];
-}
-
 /// Return the closest tool id if within edit distance 2, otherwise null.
 fn closestTool(id: []const u8, tools: []const tool_mod.Tool) ?[]const u8 {
     var best: ?[]const u8 = null;
     var best_dist: usize = 3; // threshold: suggest only if dist < 3
     for (tools) |t| {
-        const distance = editDistance(id, t.id);
+        const distance = util.editDistance(id, t.id);
         if (distance < best_dist) {
             best_dist = distance;
             best = t.id;

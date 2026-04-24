@@ -241,7 +241,6 @@ pub const InstallStrategy = union(enum) {
             const archive_path = try std.fs.path.join(ctx.allocator, &.{ ctx.tmp_dir, filename });
             defer ctx.allocator.free(archive_path);
 
-            output.printDownloading(url);
             try http.download(ctx.allocator, url, archive_path, ctx.progress);
 
             // Verify checksum if available
@@ -265,7 +264,6 @@ pub const InstallStrategy = union(enum) {
             } else if (std.mem.endsWith(u8, archive_path, ".zip")) {
                 try archive.extractZip(archive_path, extract_dir, ctx.allocator);
             }
-            output.printStepDone("Extracting", filename);
 
             // Locate the binary in the extracted tree
             const bin_subpath = try renderTemplate(ctx.allocator, self.binary_in_archive, ctx);
@@ -289,7 +287,6 @@ pub const InstallStrategy = union(enum) {
             const tmp_bin = try std.fs.path.join(ctx.allocator, &.{ ctx.tmp_dir, ctx.tool_id });
             defer ctx.allocator.free(tmp_bin);
 
-            output.printDownloading(url);
             try http.download(ctx.allocator, url, tmp_bin, ctx.progress);
 
             try installBinary(ctx, tmp_bin);
@@ -321,7 +318,6 @@ pub const InstallStrategy = union(enum) {
             );
             defer ctx.allocator.free(archive_path);
 
-            output.printDownloading(url);
             try http.download(ctx.allocator, url, archive_path, ctx.progress);
 
             const extract_dir = try std.fmt.allocPrint(ctx.allocator, "{s}/extract", .{ctx.tmp_dir});
@@ -330,7 +326,6 @@ pub const InstallStrategy = union(enum) {
             const hc_filename = std.fs.path.basename(archive_path);
             output.printStepStart("Extracting", hc_filename);
             try archive.extractZip(archive_path, extract_dir, ctx.allocator);
-            output.printStepDone("Extracting", hc_filename);
 
             const src_bin = try std.fs.path.join(ctx.allocator, &.{ extract_dir, self.product });
             defer ctx.allocator.free(src_bin);
@@ -422,13 +417,11 @@ pub const InstallStrategy = union(enum) {
             defer ctx.allocator.free(venv_result.stdout);
             defer ctx.allocator.free(venv_result.stderr);
             if (venv_result.term.Exited != 0) {
-                output.printStepDone("Venv", "failed");
                 const msg = std.mem.trim(u8, venv_result.stderr, " \n\r\t");
                 if (msg.len > 0) output.printDetail(msg);
                 output.printDetail("Ensure python3 and the venv module are installed (e.g. python3-venv on Debian/Ubuntu, python3 on AlmaLinux/RHEL)");
                 return error.VenvCreationFailed;
             }
-            output.printStepDone("Venv", install_dir);
 
             // pip install
             const pip = try std.fs.path.join(ctx.allocator, &.{ install_dir, "bin", "pip" });
@@ -443,12 +436,10 @@ pub const InstallStrategy = union(enum) {
             defer ctx.allocator.free(pip_result.stdout);
             defer ctx.allocator.free(pip_result.stderr);
             if (pip_result.term.Exited != 0) {
-                output.printStepDone("pip install", "failed");
                 const msg = std.mem.trim(u8, pip_result.stderr, " \n\r\t");
                 if (msg.len > 0) output.printDetail(msg);
                 return error.PipInstallFailed;
             }
-            output.printStepDone("pip install", self.package);
 
             std.fs.cwd().makePath(ctx.bin_dir) catch {};
 
@@ -500,7 +491,6 @@ pub const InstallStrategy = union(enum) {
             const archive_path = try std.fs.path.join(ctx.allocator, &.{ ctx.tmp_dir, filename });
             defer ctx.allocator.free(archive_path);
 
-            output.printDownloading(url);
             try http.download(ctx.allocator, url, archive_path, ctx.progress);
 
             const extract_dir = try std.fmt.allocPrint(ctx.allocator, "{s}/extract", .{ctx.tmp_dir});
@@ -514,7 +504,6 @@ pub const InstallStrategy = union(enum) {
             } else if (std.mem.endsWith(u8, archive_path, ".zip")) {
                 try archive.extractZip(archive_path, extract_dir, ctx.allocator);
             }
-            output.printStepDone("Extracting", filename);
 
             // Determine the working directory: either a persistent SDK dir or the temp extract dir
             const home = std.posix.getenv("HOME") orelse "/tmp";
@@ -730,8 +719,6 @@ fn installBinary(ctx: *InstallContext, src_path: []const u8) !void {
     ctx.allocator.free(chmod.stderr);
 
     try std.fs.rename(std.fs.cwd(), tmp_dest, std.fs.cwd(), dest);
-
-    output.printInstalledTo(dest);
 }
 
 /// Fetch and verify SHA256 checksum from url against local file.

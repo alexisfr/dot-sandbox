@@ -67,7 +67,10 @@ fn extractSection(content: []const u8, tool_id: []const u8, allocator: std.mem.A
 /// Return true if the section contains a bare tool invocation not wrapped in a
 /// shell existence guard (`if command -q` for fish, `command -v` for bash/zsh).
 fn hasUnguardedInvocations(section: []const u8, tool_id: []const u8, shell: platform.Shell) bool {
-    var guard_depth: usize = 0;
+    // depth tracks ALL if/end nesting. in_guard becomes true when we enter an
+    // `if command -q` block at the top level and stays true until the matching `end`.
+    var depth: usize = 0;
+    var in_guard = false;
     var lines = std.mem.splitScalar(u8, section, '\n');
     while (lines.next()) |line| {
         const trimmed = std.mem.trim(u8, line, " \t\r");
@@ -75,11 +78,14 @@ fn hasUnguardedInvocations(section: []const u8, tool_id: []const u8, shell: plat
 
         switch (shell) {
             .fish => {
-                if (std.mem.startsWith(u8, trimmed, "if command -q ")) {
-                    guard_depth += 1;
+                if (std.mem.startsWith(u8, trimmed, "if ")) {
+                    // Outer-level `if command -q` opens a guard; inner ifs just add depth.
+                    if (depth == 0 and std.mem.startsWith(u8, trimmed, "if command -q ")) in_guard = true;
+                    depth += 1;
                 } else if (std.mem.eql(u8, trimmed, "end")) {
-                    if (guard_depth > 0) guard_depth -= 1;
-                } else if (guard_depth == 0 and isInvocation(trimmed, tool_id)) {
+                    if (depth > 0) depth -= 1;
+                    if (depth == 0) in_guard = false;
+                } else if (!in_guard and isInvocation(trimmed, tool_id)) {
                     return true;
                 }
             },
@@ -94,14 +100,27 @@ fn hasUnguardedInvocations(section: []const u8, tool_id: []const u8, shell: plat
     return false;
 }
 
-/// True if the line's first word is the tool binary (not alias/complete/compdef).
+/// True if the line invokes the tool binary directly or via process substitution.
+/// Excludes alias/complete/compdef lines.
 fn isInvocation(line: []const u8, tool_id: []const u8) bool {
     if (std.mem.startsWith(u8, line, "alias ") or
         std.mem.startsWith(u8, line, "complete ") or
         std.mem.startsWith(u8, line, "compdef ")) return false;
-    if (!std.mem.startsWith(u8, line, tool_id)) return false;
-    if (line.len == tool_id.len) return true;
-    return line[tool_id.len] == ' ' or line[tool_id.len] == '|' or line[tool_id.len] == '\t';
+    // Direct invocation: line starts with tool_id
+    if (std.mem.startsWith(u8, line, tool_id)) {
+        if (line.len == tool_id.len) return true;
+        return line[tool_id.len] == ' ' or line[tool_id.len] == '|' or line[tool_id.len] == '\t';
+    }
+    // Process substitution: `source <(tool_id ...)` or `tool_id ... | source`
+    const proc_sub = "source <(";
+    if (std.mem.startsWith(u8, line, proc_sub)) {
+        const after = line[proc_sub.len..];
+        if (std.mem.startsWith(u8, after, tool_id)) {
+            if (after.len == tool_id.len) return true;
+            return after[tool_id.len] == ' ' or after[tool_id.len] == ')';
+        }
+    }
+    return false;
 }
 
 /// Returns true if the shell's RC file contains the dot source marker.
