@@ -309,14 +309,14 @@ fn installTool(
         tool.strategy.execute(&ctx) catch |e| {
             bar.finish();
             var status_buf: [32]u8 = undefined;
-            const hint: []const u8 = switch (http.last_status) {
+            const hint: []const u8 = if (e == error.HttpError) switch (http.last_status) {
                 404 => "release asset not found — tool may not support your platform",
                 403 => "access denied — repository may be private",
                 0 => @errorName(e),
                 else => std.fmt.bufPrint(&status_buf, "HTTP {d}", .{http.last_status}) catch @errorName(e),
-            };
+            } else @errorName(e);
             output.printStep("Installation", output.sym_fail, hint);
-            if (http.last_url.len > 0) output.printFmt("  URL: {s}\n", .{http.last_url});
+            if (e == error.HttpError and http.last_url.len > 0) output.printFmt("  URL: {s}\n", .{http.last_url});
             output.printError("Installation failed");
             return error.CommandFailed;
         };

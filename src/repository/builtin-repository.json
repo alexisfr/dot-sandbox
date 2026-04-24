@@ -665,6 +665,7 @@
             "strategy": {
                 "type": "tarball",
                 "url_template": "https://ziglang.org/download/{version}/zig-{arch_uname}-{os_zig}-{version}.tar.xz",
+                "strip_components": 0,
                 "sdk_dir": "zig-{arch_uname}-{os_zig}-{version}",
                 "sdk_name": "zig",
                 "symlinks": ["zig"]
@@ -684,6 +685,7 @@
             "strategy": {
                 "type": "tarball",
                 "url_template": "https://go.dev/dl/go{version}.{os}-{arch}.tar.gz",
+                "strip_components": 0,
                 "sdk_dir": "go",
                 "symlinks": ["bin/go", "bin/gofmt"]
             }
