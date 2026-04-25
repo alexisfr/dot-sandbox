@@ -14,9 +14,9 @@ var render_mode: RenderMode = .rich;
 
 /// Detect terminal capabilities. Call once at program startup before any output.
 pub fn initCaps() void {
-    const no_color = std.posix.getenv("NO_COLOR") != null;
-    const dumb_term = if (std.posix.getenv("TERM")) |t| std.mem.eql(u8, t, "dumb") else false;
-    const is_tty = std.posix.isatty(2); // fd 2 = stderr
+    const no_color = @import("../env.zig").getenv("NO_COLOR") != null;
+    const dumb_term = if (@import("../env.zig").getenv("TERM")) |t| std.mem.eql(u8, t, "dumb") else false;
+    const is_tty = if (std.posix.tcgetattr(2)) |_| true else |_| false; // fd 2 = stderr
 
     render_mode = if (!is_tty) .pipe else if (no_color or dumb_term) .plain else .rich;
 
@@ -93,24 +93,29 @@ pub var spin_frame_w: usize = 1; // visual column width of each frame glyph
 
 /// Print plain text as-is. Used for HELP strings and similar.
 pub fn printRaw(text: []const u8) void {
+    if (render_mode == .silent) return;
     std.debug.print("{s}", .{text});
 }
 
 /// Generic formatted print for one-off messages in cmd/ files.
 pub fn printFmt(comptime fmt: []const u8, args: anytype) void {
+    if (render_mode == .silent) return;
     std.debug.print(fmt, args);
 }
 
 pub fn printWarning(msg: []const u8) void {
+    if (render_mode == .silent) return;
     std.debug.print("  {s}{s}{s}  {s}\n", .{ yellow, sym_warn, reset, msg });
 }
 
 pub fn printError(msg: []const u8) void {
+    if (render_mode == .silent) return;
     std.debug.print("\n{s}{s}{s} {s}Error:{s} {s}\n\n", .{ red, sym_fail, reset, bold, reset, msg });
 }
 
 /// Used by both install and upgrade commands.
 pub fn printUnknownTool(id: []const u8) void {
+    if (render_mode == .silent) return;
     std.debug.print("{s}Error:{s} unknown tool '{s}'\n", .{ red, reset, id });
     std.debug.print("Run 'dot list' to see available tools\n", .{});
 }
@@ -145,18 +150,22 @@ pub fn printStepStart(step: []const u8, detail: []const u8) void {
 }
 
 pub fn printRunningCmd(cmd: []const u8, arg: []const u8) void {
+    if (render_mode == .silent) return;
     std.debug.print("   Running: {s} {s}\n", .{ cmd, arg });
 }
 
 pub fn printChecksumWarning(err_name: []const u8) void {
+    if (render_mode == .silent) return;
     std.debug.print("   {s}Warning:{s} checksum verification failed: {s}\n", .{ yellow, reset, err_name });
 }
 
 pub fn printNoPackageManager(pm_name: []const u8) void {
+    if (render_mode == .silent) return;
     std.debug.print("   No package found for package manager: {s}\n", .{pm_name});
 }
 
 pub fn printDetail(msg: []const u8) void {
+    if (render_mode == .silent) return;
     std.debug.print("   {s}\n", .{msg});
 }
 

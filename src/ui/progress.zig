@@ -1,5 +1,6 @@
 const std = @import("std");
 const output = @import("output.zig");
+const io_ctx = @import("../io_ctx.zig");
 
 /// Minimum milliseconds between redraws. Prevents flickering on fast connections.
 const redraw_interval_ms: i64 = 50; // 20 fps max
@@ -27,7 +28,7 @@ pub const ProgressBar = struct {
 
         const mode = output.getRenderMode();
         if (mode == .rich or mode == .plain) {
-            const now = std.time.milliTimestamp();
+            const now = std.Io.Timestamp.now(io_ctx.get(), .real).toMilliseconds();
             const at_100 = if (total) |t| current >= t else false;
             if (at_100 or now - self.last_draw_ms >= redraw_interval_ms) {
                 self.last_draw_ms = now;
@@ -66,7 +67,7 @@ pub const ProgressBar = struct {
             writer.print("{s}   {s}", .{ line_start, fmtBytes(current, &done_buf) }) catch return;
         }
 
-        std.debug.print("{s}", .{writer.buffered()});
+        output.printFmt("{s}", .{writer.buffered()});
     }
 
     /// Lock the line in place and move to the next line so subsequent output
@@ -82,11 +83,11 @@ pub const ProgressBar = struct {
                 // In pipe mode renderLine is never called; print a one-line summary.
                 const final_bytes = self.bytes_total orelse self.bytes_done;
                 var bytes_buf: [32]u8 = undefined;
-                std.debug.print("   {s}\n", .{fmtBytes(final_bytes, &bytes_buf)});
+                output.printFmt("   {s}\n", .{fmtBytes(final_bytes, &bytes_buf)});
             },
             // rich/plain: renderLine already drew the final 100% bar; just end the line.
             .rich, .plain => {
-                if (self.rendered) std.debug.print("\n", .{});
+                if (self.rendered) output.printFmt("\n", .{});
             },
         }
     }

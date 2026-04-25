@@ -61,8 +61,8 @@ pub fn run(
     output.printSectionHeader(hdr);
 
     // Details block
-    std.debug.print("\n", .{});
-    std.debug.print("  {s}Homepage:{s}     {s}\n", .{ output.bold, output.reset, t.homepage });
+    output.printFmt("\n", .{});
+    output.printFmt("  {s}Homepage:{s}     {s}\n", .{ output.bold, output.reset, t.homepage });
 
     // Groups
     var grp_buf: [64]u8 = undefined;
@@ -73,7 +73,7 @@ pub fn run(
     }
     const grp = gw.buffered();
     if (grp.len > 0) {
-        std.debug.print("  {s}Groups:{s}       {s}\n", .{ output.bold, output.reset, grp });
+        output.printFmt("  {s}Groups:{s}       {s}\n", .{ output.bold, output.reset, grp });
     }
 
     // Aliases
@@ -84,61 +84,61 @@ pub fn run(
             if (i > 0) aw.writeAll(", ") catch {};
             aw.writeAll(a) catch {};
         }
-        std.debug.print("  {s}Aliases:{s}      {s}\n", .{ output.bold, output.reset, aw.buffered() });
+        output.printFmt("  {s}Aliases:{s}      {s}\n", .{ output.bold, output.reset, aw.buffered() });
     }
 
     // Status section
     output.printSectionHeader("Status");
-    std.debug.print("\n", .{});
+    output.printFmt("\n", .{});
 
     if (entry) |e| {
-        const home = std.posix.getenv("HOME") orelse "";
+        const home = @import("../env.zig").getenv("HOME") orelse "";
         var bin_buf: [512]u8 = undefined;
         const bin_path = std.fmt.bufPrint(&bin_buf, "{s}/.local/bin/{s}", .{ home, t.id }) catch "";
         const pin_str: []const u8 = if (e.pinned) "yes" else "no";
-        std.debug.print("  {s}Installed:{s}    {s}{s}{s}\n", .{ output.bold, output.reset, output.green, e.version, output.reset });
-        std.debug.print("  {s}Binary:{s}       {s}\n", .{ output.bold, output.reset, bin_path });
+        output.printFmt("  {s}Installed:{s}    {s}{s}{s}\n", .{ output.bold, output.reset, output.green, e.version, output.reset });
+        output.printFmt("  {s}Binary:{s}       {s}\n", .{ output.bold, output.reset, bin_path });
         if (e.installed_at.len > 0) {
             var date_buf: [24]u8 = undefined;
             const date = output.fmtTimestamp(e.installed_at, &date_buf);
-            std.debug.print("  {s}Installed at:{s} {s}\n", .{ output.bold, output.reset, date });
+            output.printFmt("  {s}Installed at:{s} {s}\n", .{ output.bold, output.reset, date });
         }
-        std.debug.print("  {s}Method:{s}       {s}\n", .{ output.bold, output.reset, e.method });
-        std.debug.print("  {s}Pinned:{s}       {s}\n", .{ output.bold, output.reset, pin_str });
+        output.printFmt("  {s}Method:{s}       {s}\n", .{ output.bold, output.reset, e.method });
+        output.printFmt("  {s}Pinned:{s}       {s}\n", .{ output.bold, output.reset, pin_str });
 
         // Resolve latest version (non-fatal)
         const latest = t.version_source.resolve(allocator) catch null;
         defer if (latest) |l| allocator.free(l);
         if (latest) |l| {
             if (std.mem.eql(u8, l, e.version)) {
-                std.debug.print("  {s}Latest:{s}       {s}up to date{s}\n", .{ output.bold, output.reset, output.green, output.reset });
+                output.printFmt("  {s}Latest:{s}       {s}up to date{s}\n", .{ output.bold, output.reset, output.green, output.reset });
             } else {
-                std.debug.print("  {s}Latest:{s}       {s} {s}(update available){s}\n", .{ output.bold, output.reset, l, output.yellow, output.reset });
+                output.printFmt("  {s}Latest:{s}       {s} {s}(update available){s}\n", .{ output.bold, output.reset, l, output.yellow, output.reset });
             }
         }
     } else {
-        std.debug.print("  {s}not installed{s}\n", .{ output.dim, output.reset });
-        std.debug.print("\n  Run '{s}dot install {s}{s}' to install.\n", .{ output.bold, t.id, output.reset });
+        output.printFmt("  {s}not installed{s}\n", .{ output.dim, output.reset });
+        output.printFmt("\n  Run '{s}dot install {s}{s}' to install.\n", .{ output.bold, t.id, output.reset });
     }
 
     // Quick start
     if (t.quick_start.len > 0) {
         output.printSectionHeader("Quick Start");
-        std.debug.print("\n", .{});
+        output.printFmt("\n", .{});
         for (t.quick_start) |line| {
-            std.debug.print("  {s}\n", .{line});
+            output.printFmt("  {s}\n", .{line});
         }
     }
 
     // Resources
     if (t.resources.len > 0) {
         output.printSectionHeader("Resources");
-        std.debug.print("\n", .{});
+        output.printFmt("\n", .{});
         for (t.resources) |r| {
-            std.debug.print("  {s}{s}{s}: {s}\n", .{ output.bold, r.label, output.reset, r.url });
+            output.printFmt("  {s}{s}{s}: {s}\n", .{ output.bold, r.label, output.reset, r.url });
         }
     }
 
-    std.debug.print("\n", .{});
+    output.printFmt("\n", .{});
 }
 

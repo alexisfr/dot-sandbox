@@ -1,4 +1,5 @@
 const std = @import("std");
+const io_ctx = @import("io_ctx.zig");
 
 pub const ToolEntry = struct {
     version: []const u8 = "",
@@ -17,10 +18,10 @@ pub const State = struct {
     tools: std.StringHashMap(ToolEntry),
 
     pub fn init(allocator: std.mem.Allocator) !State {
-        const home = std.posix.getenv("HOME") orelse "/tmp";
+        const home = @import("env.zig").getenv("HOME") orelse "/tmp";
         const config_dir = try std.fs.path.join(allocator, &.{ home, ".config", "dot" });
         defer allocator.free(config_dir);
-        try std.fs.cwd().makePath(config_dir);
+        try std.Io.Dir.cwd().createDirPath(io_ctx.get(), config_dir);
 
         const path = try std.fs.path.join(allocator, &.{ config_dir, "state.json" });
         defer allocator.free(path); // initAt dupes it, so free our copy
@@ -54,11 +55,12 @@ pub const State = struct {
     }
 
     fn load(self: *State) !void {
-        const file = try std.fs.cwd().openFile(self.path, .{});
-        defer file.close();
+        const io = io_ctx.get();
+        const file = try std.Io.Dir.cwd().openFile(io, self.path, .{});
+        defer file.close(io);
 
         var state_read_buf: [4096]u8 = undefined;
-        var state_reader = file.readerStreaming(&state_read_buf);
+        var state_reader = file.readerStreaming(io, &state_read_buf);
         const content = try state_reader.interface.allocRemaining(self.arena.allocator(), .limited(4 * 1024 * 1024));
 
         const parsed = try std.json.parseFromSlice(
@@ -133,10 +135,11 @@ pub const State = struct {
 
         try buf.appendSlice(self.allocator, "\n  }\n}\n");
 
-        const file = try std.fs.cwd().createFile(self.path, .{});
-        defer file.close();
+        const io = io_ctx.get();
+        const file = try std.Io.Dir.cwd().createFile(io, self.path, .{});
+        defer file.close(io);
         var state_write_buf: [4096]u8 = undefined;
-        var state_writer = file.writerStreaming(&state_write_buf);
+        var state_writer = file.writerStreaming(io, &state_write_buf);
         try state_writer.interface.writeAll(buf.items);
         try state_writer.interface.flush();
     }
@@ -159,7 +162,7 @@ pub const State = struct {
         const arena_alloc = self.arena.allocator();
 
         // ISO 8601 timestamp
-        const timestamp = std.time.timestamp();
+        const timestamp = std.Io.Timestamp.now(io_ctx.get(), .real).toSeconds();
         const installed_at = try std.fmt.allocPrint(arena_alloc, "{d}", .{timestamp});
 
         const source = try std.fmt.allocPrint(
@@ -193,7 +196,8 @@ test "State: empty state has no tools" {
     defer tmp.cleanup();
 
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const n = try tmp.dir.realPath(std.testing.io, &path_buf);
+    const dir_path = path_buf[0..n];
     const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
     defer std.testing.allocator.free(state_path);
 
@@ -210,7 +214,8 @@ test "State: addTool and isInstalled" {
     defer tmp.cleanup();
 
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const n = try tmp.dir.realPath(std.testing.io, &path_buf);
+    const dir_path = path_buf[0..n];
     const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
     defer std.testing.allocator.free(state_path);
 
@@ -228,7 +233,8 @@ test "State: removeTool" {
     defer tmp.cleanup();
 
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const n = try tmp.dir.realPath(std.testing.io, &path_buf);
+    const dir_path = path_buf[0..n];
     const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
     defer std.testing.allocator.free(state_path);
 
@@ -246,7 +252,8 @@ test "State: save and load round-trip" {
     defer tmp.cleanup();
 
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const n = try tmp.dir.realPath(std.testing.io, &path_buf);
+    const dir_path = path_buf[0..n];
     const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
     defer std.testing.allocator.free(state_path);
 
@@ -271,7 +278,8 @@ test "State: multiple tools" {
     defer tmp.cleanup();
 
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const n = try tmp.dir.realPath(std.testing.io, &path_buf);
+    const dir_path = path_buf[0..n];
     const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
     defer std.testing.allocator.free(state_path);
 
@@ -293,7 +301,8 @@ test "State: pinned=true is stored and returned" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const n = try tmp.dir.realPath(std.testing.io, &path_buf);
+    const dir_path = path_buf[0..n];
     const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
     defer std.testing.allocator.free(state_path);
 
@@ -309,7 +318,8 @@ test "State: pinned=false is not pinned" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const n = try tmp.dir.realPath(std.testing.io, &path_buf);
+    const dir_path = path_buf[0..n];
     const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
     defer std.testing.allocator.free(state_path);
 
@@ -324,7 +334,8 @@ test "State: pinned survives save/load round-trip" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const n = try tmp.dir.realPath(std.testing.io, &path_buf);
+    const dir_path = path_buf[0..n];
     const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
     defer std.testing.allocator.free(state_path);
 

@@ -1,6 +1,7 @@
 const std = @import("std");
 const tool = @import("../tool.zig");
 const http = @import("../http.zig");
+const io_ctx = @import("../io_ctx.zig");
 
 const builtin_repo_name = "the-devops-hub";
 const builtin_repo_url = "https://raw.githubusercontent.com/the-devops-hub/dot/main/src/repository/builtin-repository.json";
@@ -20,12 +21,13 @@ pub fn loadBuiltinTools(allocator: std.mem.Allocator) !ExternalTools {
     const cache_path = try std.fs.path.join(allocator, &.{ dir_path, cache_filename });
     defer allocator.free(cache_path);
 
-    const now = std.time.timestamp();
+    const now = std.Io.Timestamp.now(io_ctx.get(), .real).toSeconds();
     const stale: bool = blk: {
-        const cache_file = std.fs.cwd().openFile(cache_path, .{}) catch break :blk true;
-        defer cache_file.close();
-        const file_stat = cache_file.stat() catch break :blk true;
-        const mtime_s: i64 = @intCast(@divFloor(file_stat.mtime, std.time.ns_per_s));
+        const stat_io = io_ctx.get();
+        const cache_file = std.Io.Dir.cwd().openFile(stat_io, cache_path, .{}) catch break :blk true;
+        defer cache_file.close(stat_io);
+        const file_stat = cache_file.stat(stat_io) catch break :blk true;
+        const mtime_s = file_stat.mtime.toSeconds();
         break :blk now - mtime_s > 86400;
     };
 
@@ -63,7 +65,7 @@ pub const ExternalTools = struct {
 
 /// Return path to ~/.config/dot. Caller owns result.
 pub fn configDir(allocator: std.mem.Allocator) ![]u8 {
-    const home = std.posix.getenv("HOME") orelse return error.NoHome;
+    const home = @import("../env.zig").getenv("HOME") orelse return error.NoHome;
     return std.fs.path.join(allocator, &.{ home, ".config", "dot" });
 }
 
@@ -82,7 +84,7 @@ pub fn loadExternalTools(allocator: std.mem.Allocator) !ExternalTools {
     var all_tools: std.ArrayList(tool.Tool) = .empty;
 
     for (sources) |source| {
-        const now = std.time.timestamp();
+        const now = std.Io.Timestamp.now(io_ctx.get(), .real).toSeconds();
         const fetched_at_n = std.fmt.parseInt(i64, source.fetched_at, 10) catch 0;
 
         if (now - fetched_at_n > 86400) {
@@ -108,14 +110,15 @@ pub fn loadRepositories(arena: std.mem.Allocator, allocator: std.mem.Allocator) 
     const path = try std.fs.path.join(allocator, &.{ dir, "repositories.json" });
     defer allocator.free(path);
 
-    const file = std.fs.cwd().openFile(path, .{}) catch |e| switch (e) {
+    const repos_io = io_ctx.get();
+    const file = std.Io.Dir.cwd().openFile(repos_io, path, .{}) catch |e| switch (e) {
         error.FileNotFound => return &.{},
         else => return e,
     };
-    defer file.close();
+    defer file.close(repos_io);
 
     var repos_read_buf: [4096]u8 = undefined;
-    var repos_reader = file.readerStreaming(&repos_read_buf);
+    var repos_reader = file.readerStreaming(repos_io, &repos_read_buf);
     const content = try repos_reader.interface.allocRemaining(allocator, .limited(4 * 1024 * 1024));
     defer allocator.free(content);
 
@@ -156,7 +159,8 @@ pub fn saveRepositories(allocator: std.mem.Allocator, sources: []const Repositor
     const dir = try configDir(allocator);
     defer allocator.free(dir);
 
-    try std.fs.cwd().makePath(dir);
+    const save_io = io_ctx.get();
+    try std.Io.Dir.cwd().createDirPath(save_io, dir);
 
     const path = try std.fs.path.join(allocator, &.{ dir, "repositories.json" });
     defer allocator.free(path);
@@ -175,10 +179,10 @@ pub fn saveRepositories(allocator: std.mem.Allocator, sources: []const Repositor
     }
     try buf.appendSlice(allocator, "\n  ]\n}\n");
 
-    const file = try std.fs.cwd().createFile(path, .{});
-    defer file.close();
+    const file = try std.Io.Dir.cwd().createFile(save_io, path, .{});
+    defer file.close(save_io);
     var save_write_buf: [4096]u8 = undefined;
-    var save_writer = file.writerStreaming(&save_write_buf);
+    var save_writer = file.writerStreaming(save_io, &save_write_buf);
     try save_writer.interface.writeAll(buf.items);
     try save_writer.interface.flush();
 }
@@ -191,7 +195,8 @@ pub fn fetchAndCache(allocator: std.mem.Allocator, name: []const u8, url: []cons
     const dir = try configDir(allocator);
     defer allocator.free(dir);
 
-    try std.fs.cwd().makePath(dir);
+    const fetch_io = io_ctx.get();
+    try std.Io.Dir.cwd().createDirPath(fetch_io, dir);
 
     const filename = try std.fmt.allocPrint(allocator, "repository-{s}.json", .{name});
     defer allocator.free(filename);
@@ -199,10 +204,10 @@ pub fn fetchAndCache(allocator: std.mem.Allocator, name: []const u8, url: []cons
     const path = try std.fs.path.join(allocator, &.{ dir, filename });
     defer allocator.free(path);
 
-    const file = try std.fs.cwd().createFile(path, .{});
-    defer file.close();
+    const file = try std.Io.Dir.cwd().createFile(fetch_io, path, .{});
+    defer file.close(fetch_io);
     var fetch_write_buf: [4096]u8 = undefined;
-    var fetch_writer = file.writerStreaming(&fetch_write_buf);
+    var fetch_writer = file.writerStreaming(fetch_io, &fetch_write_buf);
     try fetch_writer.interface.writeAll(body);
     try fetch_writer.interface.flush();
 
@@ -216,7 +221,7 @@ fn updateFetchedAt(allocator: std.mem.Allocator, name: []const u8) !void {
 
     const sources = loadRepositories(arena_alloc, allocator) catch return;
 
-    const now = std.time.timestamp();
+    const now = std.Io.Timestamp.now(io_ctx.get(), .real).toSeconds();
     const ts_str = try std.fmt.allocPrint(arena_alloc, "{d}", .{now});
 
     for (sources) |*s| {
@@ -239,11 +244,12 @@ fn loadCachedTools(arena: std.mem.Allocator, allocator: std.mem.Allocator, name:
     const path = try std.fs.path.join(allocator, &.{ dir, filename });
     defer allocator.free(path);
 
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
+    const load_io = io_ctx.get();
+    const file = try std.Io.Dir.cwd().openFile(load_io, path, .{});
+    defer file.close(load_io);
 
     var repo_read_buf: [4096]u8 = undefined;
-    var repo_reader = file.readerStreaming(&repo_read_buf);
+    var repo_reader = file.readerStreaming(load_io, &repo_read_buf);
     const content = try repo_reader.interface.allocRemaining(allocator, .limited(10 * 1024 * 1024));
     defer allocator.free(content);
 
@@ -615,5 +621,5 @@ test "builtin_repo_bytes: parses all built-in tools" {
     var arena_inst = std.heap.ArenaAllocator.init(alloc);
     defer arena_inst.deinit();
     const tools = try parseRepositoryJson(arena_inst.allocator(), alloc, builtin_repo_bytes);
-    try std.testing.expectEqual(@as(usize, 30), tools.len);
+    try std.testing.expectEqual(@as(usize, 31), tools.len);
 }

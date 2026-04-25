@@ -1,5 +1,6 @@
 const std = @import("std");
 const platform = @import("platform.zig");
+const io_ctx = @import("io_ctx.zig");
 
 pub const source_marker = "# dot: source shell integration";
 const path_marker = "# dot: add local bin to PATH";
@@ -7,7 +8,7 @@ const path_marker = "# dot: add local bin to PATH";
 /// Ensure the centralized integration file is sourced from the shell's RC.
 /// Idempotent.
 pub fn ensureSourced(shell: platform.Shell, allocator: std.mem.Allocator) !void {
-    const home = std.posix.getenv("HOME") orelse return error.NoHome;
+    const home = @import("env.zig").getenv("HOME") orelse return error.NoHome;
 
     const rc_path = switch (shell) {
         .bash => try std.fs.path.join(allocator, &.{ home, ".bashrc" }),
@@ -25,15 +26,16 @@ pub fn ensureSourced(shell: platform.Shell, allocator: std.mem.Allocator) !void 
 
     // Ensure integration file exists (open without truncating; create only if absent)
     const integ_dir = std.fs.path.dirname(integration_path) orelse return error.InvalidIntegrationPath;
-    try std.fs.cwd().makePath(integ_dir);
-    const integ_file = std.fs.cwd().openFile(integration_path, .{}) catch |e| switch (e) {
-        error.FileNotFound => try std.fs.cwd().createFile(integration_path, .{}),
+    const io = io_ctx.get();
+    try std.Io.Dir.cwd().createDirPath(io, integ_dir);
+    const integ_file = std.Io.Dir.cwd().openFile(io, integration_path, .{}) catch |e| switch (e) {
+        error.FileNotFound => try std.Io.Dir.cwd().createFile(io, integration_path, .{}),
         else => return e,
     };
-    integ_file.close();
+    integ_file.close(io);
 
     // Check if RC already sources our file
-    const rc_content = std.fs.cwd().openFile(rc_path, .{}) catch |e| switch (e) {
+    const rc_content = std.Io.Dir.cwd().openFile(io, rc_path, .{}) catch |e| switch (e) {
         error.FileNotFound => {
             // Create RC and add source line
             try appendToFile(rc_path, try buildSourceLine(shell, integration_path, allocator));
@@ -42,9 +44,9 @@ pub fn ensureSourced(shell: platform.Shell, allocator: std.mem.Allocator) !void 
         else => return e,
     };
     var rc_read_buf: [4096]u8 = undefined;
-    var rc_reader = rc_content.readerStreaming(&rc_read_buf);
+    var rc_reader = rc_content.readerStreaming(io, &rc_read_buf);
     const content = try rc_reader.interface.allocRemaining(allocator, .limited(1024 * 1024));
-    rc_content.close();
+    rc_content.close(io);
     defer allocator.free(content);
 
     if (std.mem.indexOf(u8, content, source_marker) != null) {
@@ -69,7 +71,7 @@ pub fn addSection(
     config: []const u8,
     allocator: std.mem.Allocator,
 ) !void {
-    const home = std.posix.getenv("HOME") orelse return error.NoHome;
+    const home = @import("env.zig").getenv("HOME") orelse return error.NoHome;
     const integration_path = try std.fs.path.join(
         allocator,
         &.{ home, ".local", "bin", shell.integrationFileName() },
@@ -86,7 +88,8 @@ pub fn addSection(
     const end_marker = try std.fmt.allocPrint(allocator, "# END {s}", .{upper_name});
     defer allocator.free(end_marker);
 
-    const file = std.fs.cwd().openFile(integration_path, .{}) catch |e| switch (e) {
+    const io = io_ctx.get();
+    const file = std.Io.Dir.cwd().openFile(io, integration_path, .{}) catch |e| switch (e) {
         error.FileNotFound => {
             const new_content = try std.fmt.allocPrint(allocator, "\n{s}\n{s}\n{s}\n", .{
                 begin_marker,
@@ -100,9 +103,9 @@ pub fn addSection(
         else => return e,
     };
     var add_read_buf: [4096]u8 = undefined;
-    var add_reader = file.readerStreaming(&add_read_buf);
+    var add_reader = file.readerStreaming(io, &add_read_buf);
     const existing = try add_reader.interface.allocRemaining(allocator, .limited(4 * 1024 * 1024));
-    file.close();
+    file.close(io);
     defer allocator.free(existing);
 
     const new_content = try rebuildWithSection(existing, begin_marker, end_marker, config, allocator);
@@ -116,7 +119,7 @@ pub fn removeSection(
     tool_name: []const u8,
     allocator: std.mem.Allocator,
 ) !void {
-    const home = std.posix.getenv("HOME") orelse return error.NoHome;
+    const home = @import("env.zig").getenv("HOME") orelse return error.NoHome;
     const integration_path = try std.fs.path.join(
         allocator,
         &.{ home, ".local", "bin", shell.integrationFileName() },
@@ -132,11 +135,12 @@ pub fn removeSection(
     const end_marker = try std.fmt.allocPrint(allocator, "# END {s}", .{upper_name});
     defer allocator.free(end_marker);
 
-    const file = std.fs.cwd().openFile(integration_path, .{}) catch return;
+    const io = io_ctx.get();
+    const file = std.Io.Dir.cwd().openFile(io, integration_path, .{}) catch return;
     var rm_read_buf: [4096]u8 = undefined;
-    var rm_reader = file.readerStreaming(&rm_read_buf);
+    var rm_reader = file.readerStreaming(io, &rm_read_buf);
     const existing = try rm_reader.interface.allocRemaining(allocator, .limited(4 * 1024 * 1024));
-    file.close();
+    file.close(io);
     defer allocator.free(existing);
 
     const new_content = try rebuildWithoutSection(existing, begin_marker, end_marker, allocator);
@@ -263,14 +267,15 @@ fn ensurePathInIntegration(
     allocator: std.mem.Allocator,
     home: []const u8,
 ) !void {
-    const file = std.fs.cwd().openFile(integration_path, .{}) catch return;
+    const io = io_ctx.get();
+    const file = std.Io.Dir.cwd().openFile(io, integration_path, .{}) catch return;
     var path_read_buf: [4096]u8 = undefined;
-    var path_reader = file.readerStreaming(&path_read_buf);
+    var path_reader = file.readerStreaming(io, &path_read_buf);
     const content = path_reader.interface.allocRemaining(allocator, .limited(1024 * 1024)) catch {
-        file.close();
+        file.close(io);
         return;
     };
-    file.close();
+    file.close(io);
     defer allocator.free(content);
 
     if (std.mem.indexOf(u8, content, path_marker) != null) return;
@@ -288,11 +293,12 @@ fn ensurePathInIntegration(
 }
 
 fn normalizeIntegrationFile(path: []const u8, allocator: std.mem.Allocator) !void {
-    const file = std.fs.cwd().openFile(path, .{}) catch return; // not yet created — nothing to normalize
+    const io = io_ctx.get();
+    const file = std.Io.Dir.cwd().openFile(io, path, .{}) catch return; // not yet created — nothing to normalize
     var norm_read_buf: [4096]u8 = undefined;
-    var norm_reader = file.readerStreaming(&norm_read_buf);
+    var norm_reader = file.readerStreaming(io, &norm_read_buf);
     const existing = try norm_reader.interface.allocRemaining(allocator, .limited(4 * 1024 * 1024));
-    file.close();
+    file.close(io);
     defer allocator.free(existing);
     const cleaned = try normalizeBlankLines(allocator, existing);
     defer allocator.free(cleaned);
@@ -300,20 +306,19 @@ fn normalizeIntegrationFile(path: []const u8, allocator: std.mem.Allocator) !voi
 }
 
 fn appendToFile(path: []const u8, content: []const u8) !void {
-    const file = try std.fs.cwd().createFile(path, .{ .truncate = false });
-    defer file.close();
-    try file.seekFromEnd(0);
-    var append_write_buf: [4096]u8 = undefined;
-    var append_writer = file.writerStreaming(&append_write_buf);
-    try append_writer.interface.writeAll(content);
-    try append_writer.interface.flush();
+    const io = io_ctx.get();
+    const file = try std.Io.Dir.cwd().createFile(io, path, .{ .truncate = false });
+    defer file.close(io);
+    const offset = try file.length(io);
+    try file.writePositionalAll(io, content, offset);
 }
 
 fn writeFile(path: []const u8, content: []const u8) !void {
-    const file = try std.fs.cwd().createFile(path, .{});
-    defer file.close();
+    const io = io_ctx.get();
+    const file = try std.Io.Dir.cwd().createFile(io, path, .{});
+    defer file.close(io);
     var write_buf: [4096]u8 = undefined;
-    var file_writer = file.writerStreaming(&write_buf);
+    var file_writer = file.writerStreaming(io, &write_buf);
     try file_writer.interface.writeAll(content);
     try file_writer.interface.flush();
 }

@@ -4,6 +4,7 @@ const tool_mod = @import("../tool.zig");
 const state_mod = @import("../state.zig");
 const output = @import("../ui/output.zig");
 const install_cmd = @import("install.zig");
+const io_ctx = @import("../io_ctx.zig");
 
 const help =
     \\Usage: dot list [options]
@@ -43,7 +44,7 @@ fn getTermWidth() usize {
         _ = std.os.linux.ioctl(1, 0x5413, @intFromPtr(&winsize)); // TIOCGWINSZ
         if (winsize.ws_col > 0) return @as(usize, winsize.ws_col);
     }
-    if (std.posix.getenv("COLUMNS")) |cols| return std.fmt.parseInt(usize, cols, 10) catch 80;
+    if (@import("../env.zig").getenv("COLUMNS")) |cols| return std.fmt.parseInt(usize, cols, 10) catch 80;
     return 80;
 }
 
@@ -111,7 +112,7 @@ pub fn run(
     const term_width = getTermWidth();
     const desc_width = if (term_width > overhead) term_width - overhead else desc_min;
 
-    const home = std.posix.getenv("HOME") orelse "";
+    const home = @import("../env.zig").getenv("HOME") orelse "";
 
     // Collect matching tools, then sort by first group name (alphabetical), then by id.
     var matched: std.ArrayList(*const tool_mod.Tool) = .empty;
@@ -192,7 +193,7 @@ pub fn run(
 fn printDetailsHeader(term_width: usize) void {
     _ = term_width;
     output.printSectionHeader("Installed Tools");
-    std.debug.print("\n{s}{s:<16} {s:<14} {s:<24} {s:<18} {s}{s}\n", .{
+    output.printFmt("\n{s}{s:<16} {s:<14} {s:<24} {s:<18} {s}{s}\n", .{
         output.bold, "Tool", "Version", "Installed At", "Method", "Pinned", output.reset,
     });
 }
@@ -201,7 +202,7 @@ fn printDetailsRow(id: []const u8, version: []const u8, installed_at: []const u8
     const v_trunc = version[0..@min(version.len, 13)];
     const at_trunc = installed_at[0..@min(installed_at.len, 23)];
     const m_trunc = method[0..@min(method.len, 17)];
-    std.debug.print("{s:<16} {s}{s:<14}{s} {s:<24} {s:<18} {s}\n", .{
+    output.printFmt("{s:<16} {s}{s:<14}{s} {s:<24} {s:<18} {s}\n", .{
         id, output.green, v_trunc, output.reset, at_trunc, m_trunc, pin,
     });
 }
@@ -209,7 +210,7 @@ fn printDetailsRow(id: []const u8, version: []const u8, installed_at: []const u8
 fn printListHeader(term_width: usize) void {
     _ = term_width;
     output.printSectionHeader("Available Tools");
-    std.debug.print("\n{s}{s:<16} {s:<14} {s:<16} Description{s}\n", .{
+    output.printFmt("\n{s}{s:<16} {s:<14} {s:<16} Description{s}\n", .{
         output.bold, "Tool", "Status", "Groups", output.reset,
     });
 }
@@ -233,19 +234,18 @@ fn truncDesc(desc: []const u8, max_visual: usize, buf: []u8) struct { str: []con
 fn isUnmanagedLocal(home: []const u8, id: []const u8, allocator: std.mem.Allocator) bool {
     const path = std.fs.path.join(allocator, &.{ home, ".local", "bin", id }) catch return false;
     defer allocator.free(path);
-    std.fs.cwd().access(path, .{}) catch return false;
+    std.Io.Dir.cwd().access(io_ctx.get(), path, .{}) catch return false;
     return true;
 }
 
 /// Returns true if the tool binary is found in PATH outside ~/.local/bin.
 fn isSystemInstalled(allocator: std.mem.Allocator, id: []const u8) bool {
-    const result = std.process.Child.run(.{
-        .allocator = allocator,
+    const result = std.process.run(allocator, io_ctx.get(), .{
         .argv = &.{ "which", id },
     }) catch return false;
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
-    if (result.term != .Exited or result.term.Exited != 0) return false;
+    if (result.term != .exited or result.term.exited != 0) return false;
     const path = std.mem.trim(u8, result.stdout, " \n\r\t");
     return path.len > 0 and !std.mem.containsAtLeast(u8, path, 1, ".local/bin");
 }
@@ -268,10 +268,10 @@ fn printListRow(id: []const u8, aliases: []const []const u8, desc: []const u8, v
         // Visual width: id + 1 space + alias_str
         const visual = id_trunc.len + 1 + alias_str.len;
         const pad = if (col_id + 1 > visual) col_id + 1 - visual else 0;
-        std.debug.print("{s} {s}{s}{s}", .{ id_trunc, output.dim, alias_str, output.reset });
-        for (0..pad) |_| std.debug.print(" ", .{});
+        output.printFmt("{s} {s}{s}{s}", .{ id_trunc, output.dim, alias_str, output.reset });
+        for (0..pad) |_| output.printFmt(" ", .{});
     } else {
-        std.debug.print("{s:<16} ", .{id_trunc});
+        output.printFmt("{s:<16} ", .{id_trunc});
     }
 
     // status column: 14 visual chars + 1 trailing space = 15 total.
@@ -281,36 +281,36 @@ fn printListRow(id: []const u8, aliases: []const []const u8, desc: []const u8, v
         const v_trunc = v[0..@min(v.len, 12)];
         const text_visual = output.sym_ok_w + 1 + v_trunc.len; // sym + space + text
         const pad = if (14 > text_visual) 14 - text_visual else 0;
-        std.debug.print("{s}{s} {s}{s}", .{ output.green, output.sym_ok, v_trunc, output.reset });
-        for (0..pad) |_| std.debug.print(" ", .{});
-        std.debug.print(" ", .{});
+        output.printFmt("{s}{s} {s}{s}", .{ output.green, output.sym_ok, v_trunc, output.reset });
+        for (0..pad) |_| output.printFmt(" ", .{});
+        output.printFmt(" ", .{});
     } else if (sys) {
         const text_visual = output.sym_warn_w + 1 + "system".len; // sym + space + text
         const pad = if (14 > text_visual) 14 - text_visual else 0;
-        std.debug.print("{s}{s} system{s}", .{ output.yellow, output.sym_warn, output.reset });
-        for (0..pad) |_| std.debug.print(" ", .{});
-        std.debug.print(" ", .{});
+        output.printFmt("{s}{s} system{s}", .{ output.yellow, output.sym_warn, output.reset });
+        for (0..pad) |_| output.printFmt(" ", .{});
+        output.printFmt(" ", .{});
     } else if (unmanaged) {
         // "~ local" = 7 visual chars; 14 - 7 = 7 padding + 1 separator = 8 spaces
-        std.debug.print("{s}~ local{s}        ", .{ output.dim, output.reset });
+        output.printFmt("{s}~ local{s}        ", .{ output.dim, output.reset });
     } else {
-        std.debug.print("{s}not installed{s}  ", .{ output.dim, output.reset });
+        output.printFmt("{s}not installed{s}  ", .{ output.dim, output.reset });
     }
 
     // groups column — ASCII, byte-pad fine; truncate if somehow over col_groups
     const g_trunc = groups[0..@min(groups.len, col_groups)];
-    std.debug.print("{s:<16} ", .{g_trunc});
+    output.printFmt("{s:<16} ", .{g_trunc});
 
     // description — rightmost, no padding needed; truncate to fit terminal
     var desc_buf: [512]u8 = undefined;
     const res = truncDesc(desc, desc_width, &desc_buf);
-    std.debug.print("{s}\n", .{res.str});
+    output.printFmt("{s}\n", .{res.str});
 }
 
 fn printListFooter(count: usize, group_filter: ?[]const u8) void {
-    std.debug.print("\n{d} tools total", .{count});
-    if (group_filter) |g| std.debug.print(" (filtered by group '{s}')", .{g});
-    std.debug.print("\n\n", .{});
+    output.printFmt("\n{d} tools total", .{count});
+    if (group_filter) |g| output.printFmt(" (filtered by group '{s}')", .{g});
+    output.printFmt("\n\n", .{});
 }
 
 test "truncDesc" {

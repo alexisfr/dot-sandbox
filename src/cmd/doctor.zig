@@ -3,6 +3,7 @@ const state_mod = @import("../state.zig");
 const tool_mod = @import("../tool.zig");
 const platform = @import("../platform.zig");
 const output = @import("../ui/output.zig");
+const io_ctx = @import("../io_ctx.zig");
 const shell_mod = @import("../shell.zig");
 const install_mod = @import("install.zig");
 
@@ -25,20 +26,20 @@ const help =
 // ─── Doctor-specific print functions ──────────────────────────────────────────
 
 fn printCheckPass(label: []const u8, detail: []const u8) void {
-    std.debug.print("  {s}{s}{s} {s:<24} {s}\n", .{ output.green, output.sym_ok, output.reset, label, detail });
+    output.printFmt("  {s}{s}{s} {s:<24} {s}\n", .{ output.green, output.sym_ok, output.reset, label, detail });
 }
 
 fn printCheckWarn(label: []const u8, detail: []const u8) void {
-    std.debug.print("  {s}{s}{s}  {s:<24} {s}\n", .{ output.yellow, output.sym_warn, output.reset, label, detail });
+    output.printFmt("  {s}{s}{s}  {s:<24} {s}\n", .{ output.yellow, output.sym_warn, output.reset, label, detail });
 }
 
 fn printCheckFail(label: []const u8, detail: []const u8) void {
-    std.debug.print("  {s}{s}{s} {s:<24} {s}\n", .{ output.red, output.sym_fail, output.reset, label, detail });
+    output.printFmt("  {s}{s}{s} {s:<24} {s}\n", .{ output.red, output.sym_fail, output.reset, label, detail });
 }
 
 fn printDoctorSummary(pass: usize, warn: usize, fail: usize) void {
     output.printSectionHeader("Summary");
-    std.debug.print("  {s}{d} passed{s}  ·  {s}{d} warnings{s}  ·  {s}{d} failed{s}\n\n", .{
+    output.printFmt("  {s}{d} passed{s}  ·  {s}{d} warnings{s}  ·  {s}{d} failed{s}\n\n", .{
         output.green,  pass,  output.reset,
         output.yellow, warn,  output.reset,
         if (fail > 0) output.red else output.dim, fail, output.reset,
@@ -132,10 +133,11 @@ fn rcHasSourceMarker(shell: platform.Shell, home: []const u8, allocator: std.mem
         .unknown => return true,
     };
     defer allocator.free(rc_path);
-    const rc_file = std.fs.cwd().openFile(rc_path, .{}) catch return false;
-    defer rc_file.close();
+    const io = io_ctx.get();
+    const rc_file = std.Io.Dir.cwd().openFile(io, rc_path, .{}) catch return false;
+    defer rc_file.close(io);
     var buf: [4096]u8 = undefined;
-    var reader = rc_file.readerStreaming(&buf);
+    var reader = rc_file.readerStreaming(io, &buf);
     const content = reader.interface.allocRemaining(allocator, .limited(1024 * 1024)) catch return false;
     defer allocator.free(content);
     return std.mem.indexOf(u8, content, shell_mod.source_marker) != null;
@@ -160,7 +162,7 @@ pub fn run(
     var warn: usize = 0;
     var fail: usize = 0;
 
-    const home = std.posix.getenv("HOME") orelse "/tmp";
+    const home = @import("../env.zig").getenv("HOME") orelse "/tmp";
 
     // System checks
     output.printSectionHeader("System");
@@ -185,7 +187,7 @@ pub fn run(
         warn += 1;
     }
 
-    const path_env = std.posix.getenv("PATH") orelse "";
+    const path_env = @import("../env.zig").getenv("PATH") orelse "";
     const local_bin_abs = std.fs.path.join(allocator, &.{ home, ".local", "bin" }) catch null;
     if (local_bin_abs) |lb| {
         defer allocator.free(lb);
@@ -207,17 +209,17 @@ pub fn run(
         const bin_path = std.fs.path.join(allocator, &.{ home, ".local", "bin", tool_id }) catch continue;
         defer allocator.free(bin_path);
 
-        if (std.fs.cwd().access(bin_path, .{})) |_| {
+        if (std.Io.Dir.cwd().access(io_ctx.get(), bin_path, .{})) |_| {
             printCheckPass(tool_id, bin_path);
             pass += 1;
             continue;
         } else |_| {}
 
         // Not in ~/.local/bin — try `which` (covers system_package installs)
-        const result = std.process.Child.run(.{
-            .allocator = allocator,
+        const result = std.process.run(allocator, io_ctx.get(), .{
             .argv = &.{ "which", tool_id },
-            .max_output_bytes = 512,
+            .stdout_limit = .limited(512),
+            .stderr_limit = .limited(512),
         }) catch {
             printCheckFail(tool_id, "not found — run: dot install <tool> --force");
             fail += 1;
@@ -225,7 +227,7 @@ pub fn run(
         };
         defer allocator.free(result.stdout);
         defer allocator.free(result.stderr);
-        if (result.term == .Exited and result.term.Exited == 0) {
+        if (result.term == .exited and result.term.exited == 0) {
             const found_path = std.mem.trimEnd(u8, result.stdout, "\n");
             printCheckPass(tool_id, found_path);
             pass += 1;
@@ -265,7 +267,7 @@ pub fn run(
         if (state.isInstalled(t.id)) continue;
         const bin_path = std.fs.path.join(allocator, &.{ home, ".local", "bin", t.id }) catch continue;
         defer allocator.free(bin_path);
-        std.fs.cwd().access(bin_path, .{}) catch continue;
+        std.Io.Dir.cwd().access(io_ctx.get(), bin_path, .{}) catch continue;
         const detail = std.fmt.allocPrint(allocator, "found in ~/.local/bin — run: dot install {s}", .{t.id}) catch null;
         defer if (detail) |d| allocator.free(d);
         printCheckWarn(t.id, detail orelse "found in ~/.local/bin but not managed by dot");
@@ -287,7 +289,7 @@ pub fn run(
 
         // For the active shell: check state before acting, then auto-fix.
         if (check_sh == shell_type) {
-            const had_file = if (std.fs.cwd().access(integ_path, .{})) |_| true else |_| false;
+            const had_file = if (std.Io.Dir.cwd().access(io_ctx.get(), integ_path, .{})) |_| true else |_| false;
             const had_source = rcHasSourceMarker(check_sh, home, allocator);
 
             if (!had_file or !had_source) {
@@ -306,11 +308,12 @@ pub fn run(
 
             // Detect and restore any missing tool sections in the integration file.
             {
-                const integ_file_r = std.fs.cwd().openFile(integ_path, .{}) catch null;
+                const io2 = io_ctx.get();
+                const integ_file_r = std.Io.Dir.cwd().openFile(io2, integ_path, .{}) catch null;
                 const integ_content: ?[]u8 = if (integ_file_r) |f| blk: {
-                    defer f.close();
+                    defer f.close(io2);
                     var ibuf: [4096]u8 = undefined;
-                    var ireader = f.readerStreaming(&ibuf);
+                    var ireader = f.readerStreaming(io2, &ibuf);
                     break :blk ireader.interface.allocRemaining(allocator, .limited(4 * 1024 * 1024)) catch null;
                 } else null;
                 defer if (integ_content) |c| allocator.free(c);
@@ -347,10 +350,11 @@ pub fn run(
         // Read integration file for unguarded invocation scan.
         // Non-active shells: silently skip if the file doesn't exist.
         const content = blk: {
-            const integ_file = std.fs.cwd().openFile(integ_path, .{}) catch break :blk null;
-            defer integ_file.close();
+            const io3 = io_ctx.get();
+            const integ_file = std.Io.Dir.cwd().openFile(io3, integ_path, .{}) catch break :blk null;
+            defer integ_file.close(io3);
             var integ_read_buf: [4096]u8 = undefined;
-            var integ_reader = integ_file.readerStreaming(&integ_read_buf);
+            var integ_reader = integ_file.readerStreaming(io3, &integ_read_buf);
             break :blk integ_reader.interface.allocRemaining(allocator, .limited(4 * 1024 * 1024)) catch null;
         };
         const c = content orelse continue;

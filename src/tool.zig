@@ -3,6 +3,7 @@ const http = @import("http.zig");
 const platform = @import("platform.zig");
 const archive = @import("archive.zig");
 const output = @import("ui/output.zig");
+const io_ctx = @import("io_ctx.zig");
 
 pub const Group = enum { k8s, cloud, iac, containers, utils, terminal, cm, security, dev };
 
@@ -415,11 +416,16 @@ pub const InstallStrategy = union(enum) {
 
             // Use spawn+wait (not run) so stdin/stdout/stderr are inherited —
             // this lets sudo reach the TTY to prompt for a password.
-            var child = std.process.Child.init(argv.items, ctx.allocator);
-            try child.spawn();
-            const term = try child.wait();
+            const io = io_ctx.get();
+            var child = try std.process.spawn(io, .{
+                .argv = argv.items,
+                .stdin = .inherit,
+                .stdout = .inherit,
+                .stderr = .inherit,
+            });
+            const term = try child.wait(io);
 
-            if (term != .Exited or term.Exited != 0) {
+            if (term != .exited or term.exited != 0) {
                 output.printDetail("Package install failed");
                 return error.PackageInstallFailed;
             }
@@ -451,7 +457,7 @@ pub const InstallStrategy = union(enum) {
         extra_binaries: []const []const u8 = &.{},
 
         pub fn execute(self: PipVenv, ctx: *InstallContext) !void {
-            const home = std.posix.getenv("HOME") orelse "/tmp";
+            const home = @import("env.zig").getenv("HOME") orelse "/tmp";
             // Expand ~ manually
             const install_dir = if (std.mem.startsWith(u8, self.install_dir_rel, "~/"))
                 try std.fs.path.join(ctx.allocator, &.{ home, self.install_dir_rel[2..] })
@@ -461,14 +467,14 @@ pub const InstallStrategy = union(enum) {
 
             // Create venv
             output.printStepStart("Venv", install_dir);
-            const venv_result = try std.process.Child.run(.{
-                .allocator = ctx.allocator,
+            const venv_result = try std.process.run(ctx.allocator, io_ctx.get(), .{
                 .argv = &.{ "python3", "-m", "venv", install_dir },
-                .max_output_bytes = 64 * 1024,
+                .stdout_limit = .limited(64 * 1024),
+                .stderr_limit = .limited(64 * 1024),
             });
             defer ctx.allocator.free(venv_result.stdout);
             defer ctx.allocator.free(venv_result.stderr);
-            if (venv_result.term.Exited != 0) {
+            if (venv_result.term != .exited or venv_result.term.exited != 0) {
                 const msg = std.mem.trim(u8, venv_result.stderr, " \n\r\t");
                 if (msg.len > 0) output.printDetail(msg);
                 output.printDetail("Ensure python3 and the venv module are installed (e.g. python3-venv on Debian/Ubuntu, python3 on AlmaLinux/RHEL)");
@@ -480,20 +486,21 @@ pub const InstallStrategy = union(enum) {
             defer ctx.allocator.free(pip);
 
             output.printStepStart("pip install", self.package);
-            const pip_result = try std.process.Child.run(.{
-                .allocator = ctx.allocator,
+            const pip_result = try std.process.run(ctx.allocator, io_ctx.get(), .{
                 .argv = &.{ pip, "install", "--upgrade", self.package },
-                .max_output_bytes = 256 * 1024,
+                .stdout_limit = .limited(256 * 1024),
+                .stderr_limit = .limited(256 * 1024),
             });
             defer ctx.allocator.free(pip_result.stdout);
             defer ctx.allocator.free(pip_result.stderr);
-            if (pip_result.term.Exited != 0) {
+            if (pip_result.term != .exited or pip_result.term.exited != 0) {
                 const msg = std.mem.trim(u8, pip_result.stderr, " \n\r\t");
                 if (msg.len > 0) output.printDetail(msg);
                 return error.PipInstallFailed;
             }
 
-            std.fs.cwd().makePath(ctx.bin_dir) catch {};
+            const io = io_ctx.get();
+            std.Io.Dir.cwd().createDirPath(io, ctx.bin_dir) catch {};
 
             // Symlink primary binary to bin_dir
             const src = try std.fs.path.join(ctx.allocator, &.{ install_dir, "bin", self.binary_name });
@@ -502,8 +509,8 @@ pub const InstallStrategy = union(enum) {
             const dst = try std.fs.path.join(ctx.allocator, &.{ ctx.bin_dir, self.binary_name });
             defer ctx.allocator.free(dst);
 
-            std.fs.cwd().deleteFile(dst) catch {};
-            try std.fs.cwd().symLink(src, dst, .{});
+            std.Io.Dir.cwd().deleteFile(io, dst) catch {};
+            try std.Io.Dir.cwd().symLink(io, src, dst, .{});
 
             // Symlink any extra binaries (e.g. ansible-playbook, ansible-vault, …)
             for (self.extra_binaries) |extra| {
@@ -511,8 +518,8 @@ pub const InstallStrategy = union(enum) {
                 defer ctx.allocator.free(extra_src);
                 const extra_dst = try std.fs.path.join(ctx.allocator, &.{ ctx.bin_dir, extra });
                 defer ctx.allocator.free(extra_dst);
-                std.fs.cwd().deleteFile(extra_dst) catch {};
-                try std.fs.cwd().symLink(extra_src, extra_dst, .{});
+                std.Io.Dir.cwd().deleteFile(io, extra_dst) catch {};
+                try std.Io.Dir.cwd().symLink(io, extra_src, extra_dst, .{});
             }
         }
     };
@@ -564,7 +571,7 @@ pub const InstallStrategy = union(enum) {
             }
 
             // Determine the working directory: either a persistent SDK dir or the temp extract dir
-            const home = std.posix.getenv("HOME") orelse "/tmp";
+            const home = @import("env.zig").getenv("HOME") orelse "/tmp";
             const effective_dir: []const u8 = if (self.sdk_dir) |sd_tmpl| blk: {
                 // sdk_dir supports template variables (e.g. zig uses version in dir name)
                 const sd = try renderTemplate(ctx.allocator, sd_tmpl, ctx);
@@ -573,19 +580,18 @@ pub const InstallStrategy = union(enum) {
                 const install_name = self.sdk_name orelse sd;
                 const sdk_path = try std.fs.path.join(ctx.allocator, &.{ home, ".local", "opt", install_name });
                 // Remove old installation and move new one into place
-                std.fs.cwd().deleteTree(sdk_path) catch {};
+                std.Io.Dir.cwd().deleteTree(io_ctx.get(), sdk_path) catch {};
                 const src = try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ extract_dir, sd });
                 defer ctx.allocator.free(src);
                 const opt_parent = try std.fs.path.join(ctx.allocator, &.{ home, ".local", "opt" });
                 defer ctx.allocator.free(opt_parent);
-                std.fs.cwd().makePath(opt_parent) catch {};
-                const mv_res = try std.process.Child.run(.{
-                    .allocator = ctx.allocator,
+                std.Io.Dir.cwd().createDirPath(io_ctx.get(), opt_parent) catch {};
+                const mv_res = try std.process.run(ctx.allocator, io_ctx.get(), .{
                     .argv = &.{ "mv", src, sdk_path },
                 });
                 ctx.allocator.free(mv_res.stdout);
                 ctx.allocator.free(mv_res.stderr);
-                if (mv_res.term != .Exited or mv_res.term.Exited != 0) return error.MoveFailed;
+                if (mv_res.term != .exited or mv_res.term.exited != 0) return error.MoveFailed;
                 break :blk sdk_path;
             } else try ctx.allocator.dupe(u8, extract_dir);
             defer ctx.allocator.free(effective_dir);
@@ -594,8 +600,7 @@ pub const InstallStrategy = union(enum) {
                 const script_path = try std.fs.path.join(ctx.allocator, &.{ effective_dir, script });
                 defer ctx.allocator.free(script_path);
 
-                const chmod_res = try std.process.Child.run(.{
-                    .allocator = ctx.allocator,
+                const chmod_res = try std.process.run(ctx.allocator, io_ctx.get(), .{
                     .argv = &.{ "chmod", "+x", script_path },
                 });
                 ctx.allocator.free(chmod_res.stdout);
@@ -623,13 +628,12 @@ pub const InstallStrategy = union(enum) {
                     for (argv.items[1..]) |arg| ctx.allocator.free(arg);
                 }
 
-                const res = try std.process.Child.run(.{
-                    .allocator = ctx.allocator,
+                const res = try std.process.run(ctx.allocator, io_ctx.get(), .{
                     .argv = argv.items,
                 });
                 ctx.allocator.free(res.stdout);
                 ctx.allocator.free(res.stderr);
-                if (res.term != .Exited or res.term.Exited != 0) return error.InstallScriptFailed;
+                if (res.term != .exited or res.term.exited != 0) return error.InstallScriptFailed;
             } else if (self.binary_rel_path) |rel| {
                 const src = try std.fs.path.join(ctx.allocator, &.{ effective_dir, rel });
                 defer ctx.allocator.free(src);
@@ -637,14 +641,15 @@ pub const InstallStrategy = union(enum) {
             }
 
             // Create symlinks from effective_dir into bin_dir
+            const symlink_io = io_ctx.get();
             for (self.symlinks) |sym| {
                 const src = try std.fs.path.join(ctx.allocator, &.{ effective_dir, sym });
                 defer ctx.allocator.free(src);
                 const dst = try std.fs.path.join(ctx.allocator, &.{ ctx.bin_dir, std.fs.path.basename(sym) });
                 defer ctx.allocator.free(dst);
-                std.fs.cwd().makePath(ctx.bin_dir) catch {};
-                std.fs.cwd().deleteFile(dst) catch {};
-                try std.fs.cwd().symLink(src, dst, .{});
+                std.Io.Dir.cwd().createDirPath(symlink_io, ctx.bin_dir) catch {};
+                std.Io.Dir.cwd().deleteFile(symlink_io, dst) catch {};
+                try std.Io.Dir.cwd().symLink(symlink_io, src, dst, .{});
             }
         }
     };
@@ -766,7 +771,8 @@ pub fn renderTemplate(allocator: std.mem.Allocator, tmpl: []const u8, ctx: *cons
 /// Copy src_path binary to ctx.bin_dir/ctx.tool_id and make it executable.
 /// Uses a copy-then-rename pattern so replacing the running binary is safe.
 fn installBinary(ctx: *InstallContext, src_path: []const u8) !void {
-    std.fs.cwd().makePath(ctx.bin_dir) catch {};
+    const io = io_ctx.get();
+    std.Io.Dir.cwd().createDirPath(io, ctx.bin_dir) catch {};
 
     const dest = try std.fs.path.join(ctx.allocator, &.{ ctx.bin_dir, ctx.tool_id });
     defer ctx.allocator.free(dest);
@@ -774,16 +780,15 @@ fn installBinary(ctx: *InstallContext, src_path: []const u8) !void {
     const tmp_dest = try std.fmt.allocPrint(ctx.allocator, "{s}.new", .{dest});
     defer ctx.allocator.free(tmp_dest);
 
-    try std.fs.cwd().copyFile(src_path, std.fs.cwd(), tmp_dest, .{});
+    try std.Io.Dir.cwd().copyFile(src_path, std.Io.Dir.cwd(), tmp_dest, io, .{});
 
-    const chmod = try std.process.Child.run(.{
-        .allocator = ctx.allocator,
+    const chmod = try std.process.run(ctx.allocator, io_ctx.get(), .{
         .argv = &.{ "chmod", "+x", tmp_dest },
     });
     ctx.allocator.free(chmod.stdout);
     ctx.allocator.free(chmod.stderr);
 
-    try std.fs.rename(std.fs.cwd(), tmp_dest, std.fs.cwd(), dest);
+    try std.Io.Dir.cwd().rename(tmp_dest, std.Io.Dir.cwd(), dest, io);
 }
 
 /// Fetch and verify SHA256 checksum from url against local file.
@@ -798,13 +803,15 @@ fn verifyChecksum(allocator: std.mem.Allocator, file_path: []const u8, checksum_
     if (expected_hex.len != 64) return error.BadChecksumFormat;
 
     // Hash the local file
-    const file = try std.fs.cwd().openFile(file_path, .{});
-    defer file.close();
+    const io = io_ctx.get();
+    const file = try std.Io.Dir.cwd().openFile(io, file_path, .{});
+    defer file.close(io);
 
     var hasher = std.crypto.hash.sha2.Sha256.init(.{});
     var buf: [65536]u8 = undefined;
+    var file_reader = file.reader(io, &buf);
     while (true) {
-        const num_read = try file.read(&buf);
+        const num_read = try file_reader.interface.readSliceShort(&buf);
         if (num_read == 0) break;
         hasher.update(buf[0..num_read]);
     }

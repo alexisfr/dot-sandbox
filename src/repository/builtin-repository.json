@@ -166,6 +166,25 @@
             }
         },
         {
+            "id": "kubens",
+            "name": "kubens",
+            "description": "Switch between Kubernetes namespaces quickly",
+            "groups": [
+                "k8s"
+            ],
+            "homepage": "https://github.com/ahmetb/kubectx",
+            "brew_formula": "kubectx",
+            "version_source": {
+                "type": "github_release",
+                "repo": "ahmetb/kubectx"
+            },
+            "strategy": {
+                "type": "github_release",
+                "url_template": "https://github.com/ahmetb/kubectx/releases/download/v{version}/kubens_v{version}_{os}_{arch_alt}.tar.gz",
+                "binary_in_archive": "kubens"
+            }
+        },
+        {
             "id": "tflint",
             "name": "tflint",
             "description": "A pluggable Terraform linter",

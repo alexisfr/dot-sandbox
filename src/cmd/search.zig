@@ -67,17 +67,17 @@ pub fn run(
         if (best_dist <= 3) {
             if (best) |b| {
                 output.printSectionHeaderFmt("No exact match for \"{s}\". Did you mean:", .{query});
-                std.debug.print("\n  {s}{s:<14}{s}  {s}\n\n", .{ output.bold, b.id, output.reset, b.description });
+                output.printFmt("\n  {s}{s:<14}{s}  {s}\n\n", .{ output.bold, b.id, output.reset, b.description });
             }
         } else {
             output.printSectionHeaderFmt("No tools match \"{s}\"", .{query});
-            std.debug.print("\nRun 'dot list' to see all available tools.\n\n", .{});
+            output.printFmt("\nRun 'dot list' to see all available tools.\n\n", .{});
         }
         return;
     }
 
     output.printSectionHeaderFmt("Results for \"{s}\" ({d})", .{ query, results.items.len });
-    std.debug.print("\n{s}{s:<18} {s:<10} Description{s}\n", .{ output.bold, "Tool", "Groups", output.reset });
+    output.printFmt("\n{s}{s:<18} {s:<10} Description{s}\n", .{ output.bold, "Tool", "Groups", output.reset });
 
     for (results.items) |r| {
         const t = r.tool;
@@ -112,11 +112,11 @@ pub fn run(
         const desc_max = 50;
         const desc_trunc = t.description[0..@min(t.description.len, desc_max)];
 
-        std.debug.print("{s:<18} {s:<10} {s}", .{ label_trunc, grp_trunc, desc_trunc });
-        if (t.description.len > desc_max) std.debug.print("…", .{});
-        std.debug.print("\n", .{});
+        output.printFmt("{s:<18} {s:<10} {s}", .{ label_trunc, grp_trunc, desc_trunc });
+        if (t.description.len > desc_max) output.printFmt("…", .{});
+        output.printFmt("\n", .{});
     }
-    std.debug.print("\n", .{});
+    output.printFmt("\n", .{});
 }
 
 /// Returns a rank score for the tool against the query (lower = better).

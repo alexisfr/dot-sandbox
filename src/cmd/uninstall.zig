@@ -5,6 +5,7 @@ const platform = @import("../platform.zig");
 const shell_mod = @import("../shell.zig");
 const output = @import("../ui/output.zig");
 const validate = @import("../validate.zig");
+const io_ctx = @import("../io_ctx.zig");
 
 fn findInTools(id: []const u8, tools: []const tool_mod.Tool) bool {
     for (tools) |t| {
@@ -74,12 +75,12 @@ pub fn run(
         return;
     }
 
-    const home = std.posix.getenv("HOME") orelse return error.NoHome;
+    const home = @import("../env.zig").getenv("HOME") orelse return error.NoHome;
 
     // Remove binary from ~/.local/bin/
     const bin_path = try std.fs.path.join(allocator, &.{ home, ".local", "bin", tool_id });
     defer allocator.free(bin_path);
-    std.fs.cwd().deleteFile(bin_path) catch |e| switch (e) {
+    std.Io.Dir.cwd().deleteFile(io_ctx.get(), bin_path) catch |e| switch (e) {
         error.FileNotFound => {}, // already gone, that's fine
         else => output.printWarning("could not remove binary"),
     };
@@ -94,13 +95,36 @@ pub fn run(
             home, ".local", "bin", sh.integrationFileName(),
         }) catch continue;
         defer allocator.free(integ_path);
-        if (std.fs.cwd().access(integ_path, .{})) |_| {
+        if (std.Io.Dir.cwd().access(io_ctx.get(), integ_path, .{})) |_| {
             shell_mod.removeSection(sh, tool_id, allocator) catch {};
             any_removed = true;
         } else |_| {}
     }
     if (any_removed) {
         output.printStep("Shell", output.sym_ok, "removed");
+    }
+
+    // For system_package installs, dot does not invoke the package manager —
+    // print the exact command the user needs to run themselves.
+    if (state.tools.get(tool_id)) |entry| {
+        if (std.mem.eql(u8, entry.method, "system_package")) {
+            const pm = platform.PackageManager.detect();
+            const rm_args = pm.removeArgs();
+            if (rm_args.len > 0) {
+                var cmd_buf: std.ArrayList(u8) = .empty;
+                defer cmd_buf.deinit(allocator);
+                for (rm_args, 0..) |arg, i| {
+                    if (i > 0) try cmd_buf.append(allocator, ' ');
+                    try cmd_buf.appendSlice(allocator, arg);
+                }
+                try cmd_buf.append(allocator, ' ');
+                try cmd_buf.appendSlice(allocator, tool_id);
+                output.printCaveats(&.{
+                    "dot does not remove system packages. To fully uninstall, run:",
+                    cmd_buf.items,
+                });
+            }
+        }
     }
 
     // Update state
@@ -113,7 +137,7 @@ pub fn run(
 
 fn printToolUninstalled(id: []const u8) void {
     output.printSectionHeaderFmt("{s} uninstalled", .{id});
-    std.debug.print("\n", .{});
+    output.printFmt("\n", .{});
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -136,7 +160,8 @@ test "uninstall: not-installed tool is a no-op on state" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const n = try tmp.dir.realPath(std.testing.io, &path_buf);
+    const dir_path = path_buf[0..n];
     const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
     defer std.testing.allocator.free(state_path);
 
@@ -153,7 +178,8 @@ test "uninstall: removes tool from state" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const n = try tmp.dir.realPath(std.testing.io, &path_buf);
+    const dir_path = path_buf[0..n];
     const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
     defer std.testing.allocator.free(state_path);
 

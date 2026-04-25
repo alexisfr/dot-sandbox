@@ -58,7 +58,8 @@ pub fn run(
 
 fn tmpStatePath(allocator: std.mem.Allocator, tmp: std.testing.TmpDir) ![]u8 {
     var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir = try tmp.dir.realpath(".", &buf);
+    const n = try tmp.dir.realPath(std.testing.io, &buf);
+    const dir = buf[0..n];
     return std.fmt.allocPrint(allocator, "{s}/state.json", .{dir});
 }
 

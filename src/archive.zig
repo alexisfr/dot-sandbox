@@ -1,50 +1,51 @@
 const std = @import("std");
+const io_ctx = @import("io_ctx.zig");
 
 /// Extract a .tar.gz archive to a destination directory.
 /// strip_components: number of leading path components to strip (like tar --strip-components).
 pub fn extractTarGz(archive_path: []const u8, dest_path: []const u8, strip_components: u32) !void {
-    try std.fs.cwd().makePath(dest_path);
-    const dest_dir = try std.fs.cwd().openDir(dest_path, .{});
+    const io = io_ctx.get();
+    try std.Io.Dir.cwd().createDirPath(io, dest_path);
+    const dest_dir = try std.Io.Dir.cwd().openDir(io, dest_path, .{});
 
-    const file = try std.fs.cwd().openFile(archive_path, .{});
-    defer file.close();
+    const file = try std.Io.Dir.cwd().openFile(io, archive_path, .{});
+    defer file.close(io);
 
     var file_buf: [4096]u8 = undefined;
-    var file_reader = file.reader(&file_buf);
+    var file_reader = file.reader(io, &file_buf);
 
     var decomp_buf: [std.compress.flate.max_window_len]u8 = undefined;
     var decomp = std.compress.flate.Decompress.init(&file_reader.interface, .gzip, &decomp_buf);
 
-    try std.tar.pipeToFileSystem(dest_dir, &decomp.reader, .{
+    try std.tar.pipeToFileSystem(io, dest_dir, &decomp.reader, .{
         .strip_components = strip_components,
     });
 }
 
 /// Extract a .tar.xz archive using system `tar`. Preserves permissions and symlinks.
 pub fn extractTarXz(archive_path: []const u8, dest_path: []const u8, strip_components: u32, allocator: std.mem.Allocator) !void {
-    try std.fs.cwd().makePath(dest_path);
+    const io = io_ctx.get();
+    try std.Io.Dir.cwd().createDirPath(io, dest_path);
     var strip_buf: [16]u8 = undefined;
     const strip_str = std.fmt.bufPrint(&strip_buf, "{d}", .{strip_components}) catch "0";
-    const result = try std.process.Child.run(.{
-        .allocator = allocator,
+    const result = try std.process.run(allocator, io_ctx.get(), .{
         .argv = &.{ "tar", "-xJf", archive_path, "-C", dest_path, "--strip-components", strip_str },
     });
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
-    if (result.term != .Exited or result.term.Exited != 0) return error.ExtractionFailed;
+    if (result.term != .exited or result.term.exited != 0) return error.ExtractionFailed;
 }
 
 /// Extract a .zip archive to a destination directory using system `unzip`.
 /// Using the system unzip preserves Unix file permissions stored in the archive.
 pub fn extractZip(archive_path: []const u8, dest_path: []const u8, allocator: std.mem.Allocator) !void {
-    try std.fs.cwd().makePath(dest_path);
-    const result = try std.process.Child.run(.{
-        .allocator = allocator,
+    try std.Io.Dir.cwd().createDirPath(io_ctx.get(), dest_path);
+    const result = try std.process.run(allocator, io_ctx.get(), .{
         .argv = &.{ "unzip", "-o", "-q", archive_path, "-d", dest_path },
     });
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
-    if (result.term != .Exited or result.term.Exited != 0) return error.ExtractionFailed;
+    if (result.term != .exited or result.term.exited != 0) return error.ExtractionFailed;
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -55,10 +56,10 @@ pub fn extractZip(archive_path: []const u8, dest_path: []const u8, allocator: st
 
 /// Run a shell command, return false if it fails or is not found.
 fn runCmd(allocator: std.mem.Allocator, argv: []const []const u8) bool {
-    const result = std.process.Child.run(.{ .allocator = allocator, .argv = argv }) catch return false;
+    const result = std.process.run(allocator, io_ctx.get(), .{ .argv = argv }) catch return false;
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
-    return result.term == .Exited and result.term.Exited == 0;
+    return result.term == .exited and result.term.exited == 0;
 }
 
 test "extractTarGz: single file, strip_components=0" {
@@ -67,8 +68,8 @@ test "extractTarGz: single file, strip_components=0" {
     defer tmp.cleanup();
 
     // Create a source file and pack it with system tar
-    try tmp.dir.writeFile(.{ .sub_path = "hello.txt", .data = "hello world\n" });
-    const tmp_path = try tmp.dir.realpathAlloc(allocator, ".");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "hello.txt", .data = "hello world\n" });
+    const tmp_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(tmp_path);
 
     const archive = try std.fmt.allocPrint(allocator, "{s}/test.tar.gz", .{tmp_path});
@@ -82,7 +83,7 @@ test "extractTarGz: single file, strip_components=0" {
     defer allocator.free(out);
     try extractTarGz(archive, out, 0);
 
-    const content = try tmp.dir.readFileAlloc(allocator, "out/hello.txt", 4096);
+    const content = try tmp.dir.readFileAlloc(std.testing.io, "out/hello.txt", allocator, .limited(4096));
     defer allocator.free(content);
     try std.testing.expectEqualStrings("hello world\n", content);
 }
@@ -92,9 +93,9 @@ test "extractTarGz: strip_components=1 strips top-level directory" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.makePath("pkg");
-    try tmp.dir.writeFile(.{ .sub_path = "pkg/binary", .data = "#!/bin/sh\n" });
-    const tmp_path = try tmp.dir.realpathAlloc(allocator, ".");
+    try tmp.dir.createDirPath(std.testing.io, "pkg");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "pkg/binary", .data = "#!/bin/sh\n" });
+    const tmp_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(tmp_path);
 
     const archive = try std.fmt.allocPrint(allocator, "{s}/pkg.tar.gz", .{tmp_path});
@@ -108,7 +109,7 @@ test "extractTarGz: strip_components=1 strips top-level directory" {
     try extractTarGz(archive, out, 1); // strip "pkg/" prefix
 
     // "binary" should be at out/binary, not out/pkg/binary
-    const content = try tmp.dir.readFileAlloc(allocator, "out/binary", 4096);
+    const content = try tmp.dir.readFileAlloc(std.testing.io, "out/binary", allocator, .limited(4096));
     defer allocator.free(content);
     try std.testing.expectEqualStrings("#!/bin/sh\n", content);
 }
@@ -118,8 +119,8 @@ test "extractZip: single file" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    try tmp.dir.writeFile(.{ .sub_path = "data.txt", .data = "zip content\n" });
-    const tmp_path = try tmp.dir.realpathAlloc(allocator, ".");
+    try tmp.dir.writeFile(std.testing.io, .{ .sub_path = "data.txt", .data = "zip content\n" });
+    const tmp_path = try tmp.dir.realPathFileAlloc(std.testing.io, ".", allocator);
     defer allocator.free(tmp_path);
 
     const archive = try std.fmt.allocPrint(allocator, "{s}/test.zip", .{tmp_path});
@@ -134,7 +135,7 @@ test "extractZip: single file" {
     defer allocator.free(out);
     try extractZip(archive, out, allocator);
 
-    const content = try tmp.dir.readFileAlloc(allocator, "out/data.txt", 4096);
+    const content = try tmp.dir.readFileAlloc(std.testing.io, "out/data.txt", allocator, .limited(4096));
     defer allocator.free(content);
     try std.testing.expectEqualStrings("zip content\n", content);
 }

@@ -68,7 +68,7 @@ pub fn run(
         output.printSectionHeaderFmt("All {d} installed tool{s} are up to date.", .{
             checked, if (checked == 1) @as([]const u8, "") else "s",
         });
-        std.debug.print("\n", .{});
+        output.printFmt("\n", .{});
         return;
     }
 
@@ -76,7 +76,7 @@ pub fn run(
         outdated.items.len, if (outdated.items.len == 1) @as([]const u8, "") else "s",
     });
 
-    std.debug.print("\n{s}{s:<18} {s:<14} {s:<14} {s}{s}\n", .{
+    output.printFmt("\n{s}{s:<18} {s:<14} {s:<14} {s}{s}\n", .{
         output.bold, "Tool", "Current", "Latest", "Pinned", output.reset,
     });
 
@@ -85,15 +85,15 @@ pub fn run(
         const cur_trunc = e.installed[0..@min(e.installed.len, 13)];
         const lat_trunc = e.latest[0..@min(e.latest.len, 13)];
         if (e.pinned) {
-            std.debug.print("{s:<18} {s:<14} {s:<14} {s}{s}{s}\n", .{
+            output.printFmt("{s:<18} {s:<14} {s:<14} {s}{s}{s}\n", .{
                 name_trunc, cur_trunc, lat_trunc, output.dim, output.sym_ok, output.reset,
             });
         } else {
-            std.debug.print("{s:<18} {s:<14} {s:<14}\n", .{ name_trunc, cur_trunc, lat_trunc });
+            output.printFmt("{s:<18} {s:<14} {s:<14}\n", .{ name_trunc, cur_trunc, lat_trunc });
         }
     }
 
-    std.debug.print("\nRun '{s}dot upgrade{s}' to upgrade all (pinned skipped unless --force).\n\n", .{
+    output.printFmt("\nRun '{s}dot upgrade{s}' to upgrade all (pinned skipped unless --force).\n\n", .{
         output.bold, output.reset,
     });
 }

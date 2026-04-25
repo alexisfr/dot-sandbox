@@ -3,6 +3,7 @@ const state_mod = @import("../state.zig");
 const loader = @import("../repository/loader.zig");
 const http = @import("../http.zig");
 const output = @import("../ui/output.zig");
+const io_ctx = @import("../io_ctx.zig");
 
 const help =
     \\Usage: dot repository <subcommand> [args]
@@ -95,22 +96,23 @@ fn cmdAdd(allocator: std.mem.Allocator, args: []const []const u8) !void {
     // Write cache file
     const dir = try loader.configDir(allocator);
     defer allocator.free(dir);
-    try std.fs.cwd().makePath(dir);
+    const io = io_ctx.get();
+    try std.Io.Dir.cwd().createDirPath(io, dir);
 
     const cache_filename = try std.fmt.allocPrint(allocator, "repository-{s}.json", .{name});
     defer allocator.free(cache_filename);
     const cache_path = try std.fs.path.join(allocator, &.{ dir, cache_filename });
     defer allocator.free(cache_path);
 
-    const cache_file = try std.fs.cwd().createFile(cache_path, .{});
-    defer cache_file.close();
+    const cache_file = try std.Io.Dir.cwd().createFile(io, cache_path, .{});
+    defer cache_file.close(io);
     var cache_write_buf: [4096]u8 = undefined;
-    var cache_writer = cache_file.writerStreaming(&cache_write_buf);
+    var cache_writer = cache_file.writerStreaming(io, &cache_write_buf);
     try cache_writer.interface.writeAll(body);
     try cache_writer.interface.flush();
 
     // Append to repositories.json
-    const now = std.time.timestamp();
+    const now = std.Io.Timestamp.now(io_ctx.get(), .real).toSeconds();
     const now_str = try std.fmt.allocPrint(arena_alloc, "{d}", .{now});
 
     var new_sources: std.ArrayList(loader.RepositorySource) = .empty;
@@ -139,12 +141,12 @@ fn cmdList(allocator: std.mem.Allocator) !void {
     const sources = loader.loadRepositories(arena_alloc, allocator) catch &.{};
 
     if (sources.len == 0) {
-        std.debug.print("No external repositories configured.\nAdd one with: dot repository add <url>\n\n", .{});
+        output.printFmt("No external repositories configured.\nAdd one with: dot repository add <url>\n\n", .{});
         return;
     }
 
     output.printSectionHeader("External Repositories");
-    std.debug.print("\n{s}{s:<20} {s:<8} {s:<24} {s}{s}\n", .{
+    output.printFmt("\n{s}{s:<20} {s:<8} {s:<24} {s}{s}\n", .{
         output.bold, "Name", "Tools", "Last Fetched", "URL", output.reset,
     });
 
@@ -157,10 +159,11 @@ fn cmdList(allocator: std.mem.Allocator) !void {
             defer allocator.free(dir);
             const path = std.fs.path.join(allocator, &.{ dir, filename }) catch break :blk 0;
             defer allocator.free(path);
-            const file = std.fs.cwd().openFile(path, .{}) catch break :blk 0;
-            defer file.close();
+            const list_io = io_ctx.get();
+            const file = std.Io.Dir.cwd().openFile(list_io, path, .{}) catch break :blk 0;
+            defer file.close(list_io);
             var list_read_buf: [4096]u8 = undefined;
-            var list_reader = file.readerStreaming(&list_read_buf);
+            var list_reader = file.readerStreaming(list_io, &list_read_buf);
             const content = list_reader.interface.allocRemaining(allocator, .limited(10 * 1024 * 1024)) catch break :blk 0;
             defer allocator.free(content);
             break :blk loader.countToolsInJson(allocator, content);
@@ -180,12 +183,12 @@ fn cmdList(allocator: std.mem.Allocator) !void {
         };
 
         const url_trunc = s.url[0..@min(s.url.len, 40)];
-        std.debug.print("{s:<20} {d:<8} {s:<24} {s}\n", .{
+        output.printFmt("{s:<20} {d:<8} {s:<24} {s}\n", .{
             s.name[0..@min(s.name.len, 19)], tool_count, fetched_str, url_trunc,
         });
     }
 
-    std.debug.print("\n{d} repositor{s} configured\n\n", .{
+    output.printFmt("\n{d} repositor{s} configured\n\n", .{
         sources.len, if (sources.len == 1) "y" else "ies",
     });
 }
@@ -228,7 +231,7 @@ fn cmdRemove(allocator: std.mem.Allocator, args: []const []const u8) !void {
         defer allocator.free(filename);
         const path = try std.fs.path.join(allocator, &.{ d, filename });
         defer allocator.free(path);
-        std.fs.cwd().deleteFile(path) catch {};
+        std.Io.Dir.cwd().deleteFile(io_ctx.get(), path) catch {};
     }
 
     output.printStep("Removed", output.sym_ok, name);
@@ -242,7 +245,7 @@ fn cmdUpdate(allocator: std.mem.Allocator, args: []const []const u8) !void {
     const sources = loader.loadRepositories(arena_alloc, allocator) catch &.{};
 
     if (sources.len == 0) {
-        std.debug.print("No repositories configured.\n", .{});
+        output.printFmt("No repositories configured.\n", .{});
         return;
     }
 
@@ -255,7 +258,7 @@ fn cmdUpdate(allocator: std.mem.Allocator, args: []const []const u8) !void {
 
         output.printStep("Updating", output.sym_arrow, s.name);
         loader.fetchAndCache(allocator, s.name, s.url) catch |e| {
-            std.debug.print("{s}{s}{s} {s}: fetch failed ({s}) — using cached\n", .{
+            output.printFmt("{s}{s}{s} {s}: fetch failed ({s}) — using cached\n", .{
                 output.red, output.sym_fail, output.reset, s.name, @errorName(e),
             });
             continue;
@@ -269,10 +272,11 @@ fn cmdUpdate(allocator: std.mem.Allocator, args: []const []const u8) !void {
             defer allocator.free(dir);
             const path = std.fs.path.join(allocator, &.{ dir, filename }) catch break :blk 0;
             defer allocator.free(path);
-            const file = std.fs.cwd().openFile(path, .{}) catch break :blk 0;
-            defer file.close();
+            const rm_io = io_ctx.get();
+            const file = std.Io.Dir.cwd().openFile(rm_io, path, .{}) catch break :blk 0;
+            defer file.close(rm_io);
             var rm_read_buf: [4096]u8 = undefined;
-            var rm_reader = file.readerStreaming(&rm_read_buf);
+            var rm_reader = file.readerStreaming(rm_io, &rm_read_buf);
             const content = rm_reader.interface.allocRemaining(allocator, .limited(10 * 1024 * 1024)) catch break :blk 0;
             defer allocator.free(content);
             break :blk loader.countToolsInJson(allocator, content);

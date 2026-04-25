@@ -44,7 +44,7 @@ pub fn run(
     }
 
     output.printSectionHeader("Groups");
-    std.debug.print("\n{s}{s:<16} {s:<7} Description{s}\n", .{ output.bold, "Group", "Tools", output.reset });
+    output.printFmt("\n{s}{s:<16} {s:<7} Description{s}\n", .{ output.bold, "Group", "Tools", output.reset });
 
     for (group_descs) |gd| {
         var count: usize = 0;
@@ -53,8 +53,8 @@ pub fn run(
                 if (g == gd.group) { count += 1; break; }
             }
         }
-        std.debug.print("{s:<16} {d:<7} {s}\n", .{ @tagName(gd.group), count, gd.desc });
+        output.printFmt("{s:<16} {d:<7} {s}\n", .{ @tagName(gd.group), count, gd.desc });
     }
 
-    std.debug.print("\n{s}Tip:{s} 'dot list -g <group>'  ·  'dot install -g <group>'\n\n", .{ output.dim, output.reset });
+    output.printFmt("\n{s}Tip:{s} 'dot list -g <group>'  ·  'dot install -g <group>'\n\n", .{ output.dim, output.reset });
 }

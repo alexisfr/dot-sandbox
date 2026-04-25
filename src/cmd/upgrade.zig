@@ -3,6 +3,7 @@ const tool_mod = @import("../tool.zig");
 const state_mod = @import("../state.zig");
 const install_cmd = @import("install.zig");
 const output = @import("../ui/output.zig");
+const io_ctx = @import("../io_ctx.zig");
 
 pub const UpgradeArgs = struct {
     force: bool = false,
@@ -130,7 +131,7 @@ fn runBatch(
     state: *state_mod.State,
     tools: []const tool_mod.Tool,
 ) !void {
-    const start_ms = std.time.milliTimestamp();
+    const start_ms = std.Io.Timestamp.now(io_ctx.get(), .real).toMilliseconds();
     var upgraded: usize = 0;
     var already_current: usize = 0;
     var failed: usize = 0;
@@ -154,7 +155,7 @@ fn runBatch(
         if (changed) upgraded += 1 else already_current += 1;
     }
 
-    const elapsed_ms: u64 = @intCast(@max(0, std.time.milliTimestamp() - start_ms));
+    const elapsed_ms: u64 = @intCast(@max(0, std.Io.Timestamp.now(io_ctx.get(), .real).toMilliseconds() - start_ms));
     output.printSummary(upgraded, already_current, failed, elapsed_ms);
 }
 
@@ -240,7 +241,8 @@ test "group upgrade only touches installed tools" {
     var tmp = std.testing.tmpDir(.{});
     defer tmp.cleanup();
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dir_path = try tmp.dir.realpath(".", &path_buf);
+    const n = try tmp.dir.realPath(std.testing.io, &path_buf);
+    const dir_path = path_buf[0..n];
     const state_path = try std.fmt.allocPrint(std.testing.allocator, "{s}/state.json", .{dir_path});
     defer std.testing.allocator.free(state_path);
 

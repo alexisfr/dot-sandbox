@@ -1,15 +1,15 @@
 const std = @import("std");
 const cli = @import("cli.zig");
+const env = @import("env.zig");
+const io_ctx = @import("io_ctx.zig");
 
-pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .{};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    env.init(init.minimal.environ);
+    io_ctx.init(init.io);
 
-    const argv = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, argv);
+    const argv = try init.minimal.args.toSlice(init.arena.allocator());
 
-    cli.run(allocator, argv) catch |e| switch (e) {
+    cli.run(init.gpa, argv) catch |e| switch (e) {
         // CommandFailed means the command already printed its own error message.
         // Exit with code 1 without printing anything — avoids the double "error: Foo" line.
         error.CommandFailed => std.process.exit(1),
@@ -19,6 +19,8 @@ pub fn main() !void {
 
 // Pull in all tests from submodules
 test {
+    _ = @import("env.zig");
+    _ = @import("io_ctx.zig");
     _ = @import("platform.zig");
     _ = @import("tool.zig");
     _ = @import("archive.zig");

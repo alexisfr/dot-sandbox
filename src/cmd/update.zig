@@ -7,6 +7,7 @@ const state_mod = @import("../state.zig");
 const tool_mod = @import("../tool.zig");
 const version_mod = @import("../version.zig");
 const progress_mod = @import("../ui/progress.zig");
+const io_ctx = @import("../io_ctx.zig");
 
 const help =
     \\Usage: dot update [--force]
@@ -45,17 +46,17 @@ pub fn run(
         switch (e) {
             error.VersionFetchFailed => {
                 output.printError("could not reach GitHub API");
-                std.debug.print("  URL: {s}\n", .{api_url});
-                std.debug.print("  The repository may be private, or you may be offline.\n", .{});
+                output.printFmt("  URL: {s}\n", .{api_url});
+                output.printFmt("  The repository may be private, or you may be offline.\n", .{});
             },
             error.VersionNotFound => {
                 output.printError("no stable releases found");
-                std.debug.print("  URL: {s}\n", .{api_url});
-                std.debug.print("  No releases have been published yet.\n", .{});
+                output.printFmt("  URL: {s}\n", .{api_url});
+                output.printFmt("  No releases have been published yet.\n", .{});
             },
             error.VersionParseFailed => {
                 output.printError("unexpected response from GitHub API");
-                std.debug.print("  URL: {s}\n", .{api_url});
+                output.printFmt("  URL: {s}\n", .{api_url});
             },
             else => output.printError(@errorName(e)),
         }
@@ -66,10 +67,10 @@ pub fn run(
     const current = version_mod.current;
 
     if (!force and std.mem.eql(u8, current, latest)) {
-        std.debug.print("{s}Warning:{s} dot {s} is already up to date.\n", .{
+        output.printFmt("{s}Warning:{s} dot {s} is already up to date.\n", .{
             output.yellow, output.reset, current,
         });
-        std.debug.print("To reinstall: dot update --force\n", .{});
+        output.printFmt("To reinstall: dot update --force\n", .{});
         return;
     }
 
@@ -91,8 +92,9 @@ pub fn run(
     // Temp directory for download and extraction
     const tmp_dir = try std.fmt.allocPrint(allocator, "/tmp/dot-update-{s}", .{latest});
     defer allocator.free(tmp_dir);
-    std.fs.cwd().makePath(tmp_dir) catch {};
-    defer std.fs.cwd().deleteTree(tmp_dir) catch {};
+    const io = io_ctx.get();
+    std.Io.Dir.cwd().createDirPath(io, tmp_dir) catch {};
+    defer std.Io.Dir.cwd().deleteTree(io, tmp_dir) catch {};
 
     const archive_path = try std.fs.path.join(allocator, &.{ tmp_dir, "dot.tar.gz" });
     defer allocator.free(archive_path);
@@ -131,10 +133,10 @@ pub fn run(
     defer allocator.free(src_bin);
 
     // Install path
-    const home = std.posix.getenv("HOME") orelse "/tmp";
+    const home = @import("../env.zig").getenv("HOME") orelse "/tmp";
     const bin_dir = try std.fs.path.join(allocator, &.{ home, ".local", "bin" });
     defer allocator.free(bin_dir);
-    std.fs.cwd().makePath(bin_dir) catch {};
+    std.Io.Dir.cwd().createDirPath(io, bin_dir) catch {};
 
     const dest = try std.fs.path.join(allocator, &.{ bin_dir, "dot" });
     defer allocator.free(dest);
@@ -142,27 +144,26 @@ pub fn run(
     defer allocator.free(tmp_dest);
 
     // Copy, chmod, atomic rename
-    std.fs.cwd().copyFile(src_bin, std.fs.cwd(), tmp_dest, .{}) catch |e| {
+    std.Io.Dir.cwd().copyFile(src_bin, std.Io.Dir.cwd(), tmp_dest, io, .{}) catch |e| {
         output.printStep("Install", output.sym_fail, @errorName(e));
         output.printError("Could not copy binary");
         return error.CommandFailed;
     };
 
-    const chmod = try std.process.Child.run(.{
-        .allocator = allocator,
+    const chmod = try std.process.run(allocator, io, .{
         .argv = &.{ "chmod", "+x", tmp_dest },
     });
     allocator.free(chmod.stdout);
     allocator.free(chmod.stderr);
 
-    std.fs.rename(std.fs.cwd(), tmp_dest, std.fs.cwd(), dest) catch |e| {
+    std.Io.Dir.cwd().rename(tmp_dest, std.Io.Dir.cwd(), dest, io) catch |e| {
         output.printStep("Install", output.sym_fail, @errorName(e));
         output.printError("Could not replace binary");
         return error.CommandFailed;
     };
 
     output.printStep("Installing dot", output.sym_ok, "");
-    std.debug.print("   {s}\n", .{dest});
+    output.printDetail(dest);
 
     // Update state
     try state.addTool("dot", latest, "github_release", false);

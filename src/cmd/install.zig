@@ -8,6 +8,7 @@ const validate = @import("../validate.zig");
 const util = @import("../util.zig");
 const http = @import("../http.zig");
 const progress_mod = @import("../ui/progress.zig");
+const io_ctx = @import("../io_ctx.zig");
 
 fn progressCbFn(ctx: *anyopaque, done: u64, total: ?u64) void {
     const bar: *progress_mod.ProgressBar = @ptrCast(@alignCast(ctx));
@@ -83,18 +84,18 @@ fn printAvailableGroups(tools: []const tool_mod.Tool) void {
         }
     }
 
-    std.debug.print("\nGroups: ", .{});
+    output.printFmt("\nGroups: ", .{});
     var shown: usize = 0;
     inline for (std.meta.fields(tool_mod.Group)) |field| {
         if (shown >= max_groups) break;
         if (seen[field.value]) {
-            if (shown > 0) std.debug.print(", ", .{});
-            std.debug.print("{s}", .{field.name});
+            if (shown > 0) output.printFmt(", ", .{});
+            output.printFmt("{s}", .{field.name});
             shown += 1;
         }
     }
-    if (shown > 0) std.debug.print(", all", .{});
-    std.debug.print("\n\n", .{});
+    if (shown > 0) output.printFmt(", all", .{});
+    output.printFmt("\n\n", .{});
 }
 
 pub fn run(
@@ -203,7 +204,7 @@ fn installTool(
     const tool = found orelse {
         output.printUnknownTool(id);
         if (closestTool(id, tools)) |suggestion| {
-            std.debug.print("Did you mean '{s}'?\n", .{suggestion});
+            output.printFmt("Did you mean '{s}'?\n", .{suggestion});
         }
         return;
     };
@@ -280,15 +281,16 @@ fn installTool(
 
     if (!used_brew) {
         // Native install path: download, extract, copy binary
-        const home = std.posix.getenv("HOME") orelse "/tmp";
+        const home = @import("../env.zig").getenv("HOME") orelse "/tmp";
         const bin_dir = try std.fs.path.join(allocator, &.{ home, ".local", "bin" });
         defer allocator.free(bin_dir);
 
         const tmp_dir = try std.fmt.allocPrint(allocator, "/tmp/dot-{s}-{s}", .{ tool.id, version });
         defer allocator.free(tmp_dir);
 
-        std.fs.cwd().makePath(tmp_dir) catch {};
-        defer std.fs.cwd().deleteTree(tmp_dir) catch {};
+        const io = io_ctx.get();
+        std.Io.Dir.cwd().createDirPath(io, tmp_dir) catch {};
+        defer std.Io.Dir.cwd().deleteTree(io, tmp_dir) catch {};
 
         var dl_buf: [256]u8 = undefined;
         const dl_step = std.fmt.bufPrint(&dl_buf, "Downloading {s} {s}", .{ tool.name, version }) catch "Downloading";
@@ -326,7 +328,7 @@ fn installTool(
         output.printStep(inst_step, output.sym_ok, "");
         var bin_path_buf: [512]u8 = undefined;
         const bin_path = std.fmt.bufPrint(&bin_path_buf, "{s}/{s}", .{ bin_dir, tool.id }) catch bin_dir;
-        std.debug.print("   {s}\n", .{bin_path});
+        output.printDetail(bin_path);
     }
 
     // Shell integration (always, regardless of install method)
@@ -338,8 +340,7 @@ fn installTool(
         for (tool.post_install) |cmd| {
             const wrapped = try std.fmt.allocPrint(allocator, "export PATH=\"$HOME/.local/bin:$PATH\"; {s}", .{cmd});
             defer allocator.free(wrapped);
-            const result = std.process.Child.run(.{
-                .allocator = allocator,
+            const result = std.process.run(allocator, io_ctx.get(), .{
                 .argv = &.{ "sh", "-c", wrapped },
             }) catch |e| {
                 output.printFmt("  {s}{s}{s} {s} ({s})\n", .{ output.red, output.sym_fail, output.reset, cmd, @errorName(e) });
@@ -347,7 +348,7 @@ fn installTool(
             };
             defer allocator.free(result.stdout);
             defer allocator.free(result.stderr);
-            if (result.term.Exited == 0) {
+            if (result.term == .exited and result.term.exited == 0) {
                 output.printFmt("  {s}{s}{s} {s}\n", .{ output.green, output.sym_ok, output.reset, cmd });
             } else {
                 output.printFmt("  {s}{s}{s} {s}\n", .{ output.red, output.sym_fail, output.reset, cmd });
@@ -361,8 +362,7 @@ fn installTool(
         for (tool.post_upgrade) |cmd| {
             const wrapped = try std.fmt.allocPrint(allocator, "export PATH=\"$HOME/.local/bin:$PATH\"; {s}", .{cmd});
             defer allocator.free(wrapped);
-            const result = std.process.Child.run(.{
-                .allocator = allocator,
+            const result = std.process.run(allocator, io_ctx.get(), .{
                 .argv = &.{ "sh", "-c", wrapped },
             }) catch |e| {
                 output.printFmt("  {s}{s}{s} {s} ({s})\n", .{ output.red, output.sym_fail, output.reset, cmd, @errorName(e) });
@@ -370,7 +370,7 @@ fn installTool(
             };
             defer allocator.free(result.stdout);
             defer allocator.free(result.stderr);
-            if (result.term.Exited == 0) {
+            if (result.term == .exited and result.term.exited == 0) {
                 output.printFmt("  {s}{s}{s} {s}\n", .{ output.green, output.sym_ok, output.reset, cmd });
             } else {
                 output.printFmt("  {s}{s}{s} {s}\n", .{ output.red, output.sym_fail, output.reset, cmd });
@@ -457,14 +457,13 @@ fn writeShellIntegration(t: *const tool_mod.Tool, allocator: std.mem.Allocator, 
 fn brewInstall(allocator: std.mem.Allocator, formula: []const u8, force: bool) !void {
     // `brew reinstall` always reinstalls; `brew install` is a no-op if already present
     const brew_cmd: []const u8 = if (force) "reinstall" else "install";
-    const result = try std.process.Child.run(.{
-        .allocator = allocator,
+    const result = try std.process.run(allocator, io_ctx.get(), .{
         .argv = &.{ "brew", brew_cmd, formula },
     });
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
 
-    if (result.term.Exited != 0) {
+    if (result.term != .exited or result.term.exited != 0) {
         const msg = std.mem.trim(u8, result.stderr, " \n\r\t");
         if (msg.len > 0) output.printDetail(msg);
         return error.BrewInstallFailed;
@@ -473,19 +472,19 @@ fn brewInstall(allocator: std.mem.Allocator, formula: []const u8, force: bool) !
 
 /// Returns owned path string if tool is found in system PATH outside ~/.local/bin.
 fn checkSystemInstall(allocator: std.mem.Allocator, id: []const u8) ?[]u8 {
-    const home = std.posix.getenv("HOME") orelse return null;
+    const home = @import("../env.zig").getenv("HOME") orelse return null;
     const our_path = std.fs.path.join(allocator, &.{ home, ".local", "bin", id }) catch return null;
     defer allocator.free(our_path);
 
-    const result = std.process.Child.run(.{
-        .allocator = allocator,
+    const result = std.process.run(allocator, io_ctx.get(), .{
         .argv = &.{ "which", id },
-        .max_output_bytes = 512,
+        .stdout_limit = .limited(512),
+        .stderr_limit = .limited(512),
     }) catch return null;
     defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
 
-    if (result.term != .Exited or result.term.Exited != 0) return null;
+    if (result.term != .exited or result.term.exited != 0) return null;
 
     const path = std.mem.trim(u8, result.stdout, " \n\r\t");
     if (path.len == 0) return null;
@@ -509,58 +508,58 @@ pub fn parseGroup(name: []const u8) ?tool_mod.Group {
 // ─── Install-specific print functions ─────────────────────────────────────────
 
 fn printPinnedSkip(tool_name: []const u8, tool_id: []const u8, version: []const u8) void {
-    std.debug.print("{s}{s}{s} {s}{s}{s} is pinned at {s} — skipping\n", .{ output.cyan, output.sym_pin, output.reset, output.bold, tool_name, output.reset, version });
-    std.debug.print("   To upgrade anyway: dot install {s} --force\n", .{tool_id});
+    output.printFmt("{s}{s}{s} {s}{s}{s} is pinned at {s} — skipping\n", .{ output.cyan, output.sym_pin, output.reset, output.bold, tool_name, output.reset, version });
+    output.printFmt("   To upgrade anyway: dot install {s} --force\n", .{tool_id});
 }
 
 fn printAlreadyReady(tool: []const u8, version: []const u8, tool_id: []const u8) void {
-    std.debug.print("{s}Warning:{s} {s} {s} is already installed and up-to-date.\n", .{
+    output.printFmt("{s}Warning:{s} {s} {s} is already installed and up-to-date.\n", .{
         output.yellow, output.reset, tool, version,
     });
-    std.debug.print("To reinstall: dot install {s} --force\n", .{tool_id});
+    output.printFmt("To reinstall: dot install {s} --force\n", .{tool_id});
 }
 
 fn printQuickStart(cmds: []const []const u8) void {
-    std.debug.print("{s}{s}{s} {s}Quick Start:{s}\n", .{ output.cyan, output.sym_books, output.reset, output.bold, output.reset });
+    output.printFmt("{s}{s}{s} {s}Quick Start:{s}\n", .{ output.cyan, output.sym_books, output.reset, output.bold, output.reset });
     for (cmds) |cmd| {
-        std.debug.print("  $ {s}\n", .{cmd});
+        output.printFmt("  $ {s}\n", .{cmd});
     }
-    std.debug.print("\n", .{});
+    output.printFmt("\n", .{});
 }
 
 fn printResources(items: []const []const u8) void {
-    std.debug.print("{s}{s}{s} {s}Resources:{s}\n", .{ output.cyan, output.sym_link, output.reset, output.bold, output.reset });
+    output.printFmt("{s}{s}{s} {s}Resources:{s}\n", .{ output.cyan, output.sym_link, output.reset, output.bold, output.reset });
     for (items) |item| {
-        std.debug.print("  • {s}\n", .{item});
+        output.printFmt("  • {s}\n", .{item});
     }
 }
 
 fn printShellReloadHint(shell_type: platform.Shell) void {
     const file = shell_type.integrationFileName();
     output.printSectionHeader("Caveats");
-    std.debug.print("  To activate in this shell:\n    source ~/.local/bin/{s}\n", .{file});
+    output.printFmt("  To activate in this shell:\n    source ~/.local/bin/{s}\n", .{file});
 }
 
 fn printSkipSystem(tool_name: []const u8, tool_id: []const u8, path: []const u8, sys_ver: []const u8, latest: []const u8) void {
-    std.debug.print("\n{s}Warning:{s} {s}{s}{s} is already installed (system)\n", .{
+    output.printFmt("\n{s}Warning:{s} {s}{s}{s} is already installed (system)\n", .{
         output.yellow, output.reset, output.bold, tool_name, output.reset,
     });
-    std.debug.print("  Location:  {s}\n", .{path});
-    std.debug.print("  Version:   {s}  {s}  {s}\n", .{ sys_ver, output.sym_arrow, latest });
-    std.debug.print("To install dot's version: dot install {s} --force\n\n", .{tool_id});
+    output.printFmt("  Location:  {s}\n", .{path});
+    output.printFmt("  Version:   {s}  {s}  {s}\n", .{ sys_ver, output.sym_arrow, latest });
+    output.printFmt("To install dot's version: dot install {s} --force\n\n", .{tool_id});
 }
 
 fn printVersionFetchWarning(err_name: []const u8) void {
-    std.debug.print("{s}Warning:{s} could not fetch version ({s}), using 'latest'\n", .{ output.yellow, output.reset, err_name });
+    output.printFmt("{s}Warning:{s} could not fetch version ({s}), using 'latest'\n", .{ output.yellow, output.reset, err_name });
 }
 
 fn printUnknownGroup(name: []const u8) void {
-    std.debug.print("{s}Error:{s} unknown group '{s}'\n", .{ output.red, output.reset, name });
-    std.debug.print("Available groups: k8s, cloud, iac, containers, utils, terminal, cm, security, all\n", .{});
+    output.printFmt("{s}Error:{s} unknown group '{s}'\n", .{ output.red, output.reset, name });
+    output.printFmt("Available groups: k8s, cloud, iac, containers, utils, terminal, cm, security, all\n", .{});
 }
 
 fn printGroupToolError(id: []const u8, err: anyerror) void {
-    std.debug.print("  {s}Failed{s} to install {s}: {s}\n", .{ output.red, output.reset, id, @errorName(err) });
+    output.printFmt("  {s}Failed{s} to install {s}: {s}\n", .{ output.red, output.reset, id, @errorName(err) });
 }
 
 fn printGroupBanner(group_name: []const u8, count: usize) void {

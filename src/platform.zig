@@ -1,5 +1,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
+const io_ctx = @import("io_ctx.zig");
 
 pub const OperatingSystem = enum {
     linux,
@@ -106,7 +107,7 @@ pub const Shell = enum {
     unknown,
 
     pub fn detect() Shell {
-        const shell_env = std.posix.getenv("SHELL") orelse return .unknown;
+        const shell_env = @import("env.zig").getenv("SHELL") orelse return .unknown;
         const shell_name = std.fs.path.basename(shell_env);
         if (std.mem.eql(u8, shell_name, "bash")) return .bash;
         if (std.mem.eql(u8, shell_name, "zsh")) return .zsh;
@@ -170,8 +171,7 @@ pub const PackageManager = enum {
     pub fn isAvailable(self: PackageManager) bool {
         const cmd = self.command() orelse return false;
         // Use std.process to check
-        const result = std.process.Child.run(.{
-            .allocator = std.heap.page_allocator,
+        const result = std.process.run(std.heap.page_allocator, io_ctx.get(), .{
             .argv = &.{ "sh", "-c", std.fmt.allocPrint(
                 std.heap.page_allocator,
                 "command -v {s}",
@@ -180,7 +180,7 @@ pub const PackageManager = enum {
         }) catch return false;
         std.heap.page_allocator.free(result.stdout);
         std.heap.page_allocator.free(result.stderr);
-        return result.term.Exited == 0;
+        return result.term == .exited and result.term.exited == 0;
     }
 
     pub fn command(self: PackageManager) ?[]const u8 {
@@ -210,6 +210,22 @@ pub const PackageManager = enum {
             .brew => &.{ "brew", "install" },
             .flatpak => &.{ "flatpak", "install", "-y" },
             .snap => &.{ "snap", "install" },
+            .unknown => &.{},
+        };
+    }
+
+    /// Remove command prefix (without package name)
+    pub fn removeArgs(self: PackageManager) []const []const u8 {
+        return switch (self) {
+            .pacman => &.{ "sudo", "pacman", "-R" },
+            .apt => &.{ "sudo", "apt-get", "remove", "-y" },
+            .dnf => &.{ "sudo", "dnf", "remove", "-y" },
+            .yum => &.{ "sudo", "yum", "remove", "-y" },
+            .zypper => &.{ "sudo", "zypper", "remove", "-y" },
+            .apk => &.{ "sudo", "apk", "del" },
+            .brew => &.{ "brew", "uninstall" },
+            .flatpak => &.{ "flatpak", "uninstall", "-y" },
+            .snap => &.{ "snap", "remove" },
             .unknown => &.{},
         };
     }

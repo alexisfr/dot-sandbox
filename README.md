@@ -97,7 +97,7 @@ External tools override builtins with the same ID, so you can pin or replace any
 
 ## Build from source
 
-Requires [Zig 0.15.2](https://ziglang.org/download/).
+Requires [Zig](https://ziglang.org/download/).
 
 ```sh
 git clone https://github.com/the-devops-hub/dot
