@@ -6,6 +6,8 @@ const shell_mod = @import("../shell.zig");
 const output = @import("../ui/output.zig");
 const validate = @import("../validate.zig");
 const io_ctx = @import("../io_ctx.zig");
+const paths = @import("../paths.zig");
+const env = @import("../env.zig");
 
 fn findInTools(id: []const u8, tools: []const tool_mod.Tool) bool {
     for (tools) |t| {
@@ -75,10 +77,10 @@ pub fn run(
         return;
     }
 
-    const home = @import("../env.zig").getenv("HOME") orelse return error.NoHome;
+    const home = env.getenv("HOME") orelse return error.NoHome;
 
     // Remove binary from ~/.local/bin/
-    const bin_path = try std.fs.path.join(allocator, &.{ home, ".local", "bin", tool_id });
+    const bin_path = try std.fs.path.join(allocator, &.{ home, paths.local_dir, paths.bin_dir, tool_id });
     defer allocator.free(bin_path);
     std.Io.Dir.cwd().deleteFile(io_ctx.get(), bin_path) catch |e| switch (e) {
         error.FileNotFound => {}, // already gone, that's fine
@@ -92,7 +94,7 @@ pub fn run(
     const all_shells = [_]platform.Shell{ .bash, .zsh, .fish };
     for (all_shells) |sh| {
         const integ_path = std.fs.path.join(allocator, &.{
-            home, ".local", "bin", sh.integrationFileName(),
+            home, paths.local_dir, paths.bin_dir, sh.integrationFileName(),
         }) catch continue;
         defer allocator.free(integ_path);
         if (std.Io.Dir.cwd().access(io_ctx.get(), integ_path, .{})) |_| {
@@ -107,7 +109,7 @@ pub fn run(
     // For system_package installs, dot does not invoke the package manager —
     // print the exact command the user needs to run themselves.
     if (state.tools.get(tool_id)) |entry| {
-        if (std.mem.eql(u8, entry.method, "system_package")) {
+        if (std.mem.eql(u8, entry.method, tool_mod.method_system_package)) {
             const pm = platform.PackageManager.detect();
             const rm_args = pm.removeArgs();
             if (rm_args.len > 0) {

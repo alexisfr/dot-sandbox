@@ -1,12 +1,23 @@
 const std = @import("std");
 const io_ctx = @import("io_ctx.zig");
+const paths = @import("paths.zig");
+
+const state_filename = "state.json";
+const default_tool_status = "installed";
+const json_key_tools = "tools";
+const json_key_version = "version";
+const json_key_installed_at = "installed_at";
+const json_key_method = "method";
+const json_key_source = "source";
+const json_key_status = "status";
+const json_key_pinned = "pinned";
 
 pub const ToolEntry = struct {
     version: []const u8 = "",
     installed_at: []const u8 = "",
     method: []const u8 = "",
     source: []const u8 = "",
-    status: []const u8 = "installed",
+    status: []const u8 = default_tool_status,
     pinned: bool = false,
 };
 
@@ -18,12 +29,12 @@ pub const State = struct {
     tools: std.StringHashMap(ToolEntry),
 
     pub fn init(allocator: std.mem.Allocator) !State {
-        const home = @import("env.zig").getenv("HOME") orelse "/tmp";
-        const config_dir = try std.fs.path.join(allocator, &.{ home, ".config", "dot" });
+        const home = @import("env.zig").getenv("HOME") orelse paths.fallback_home;
+        const config_dir = try std.fs.path.join(allocator, &.{ home, paths.config_dir, paths.dot_config_subdir });
         defer allocator.free(config_dir);
         try std.Io.Dir.cwd().createDirPath(io_ctx.get(), config_dir);
 
-        const path = try std.fs.path.join(allocator, &.{ config_dir, "state.json" });
+        const path = try std.fs.path.join(allocator, &.{ config_dir, state_filename });
         defer allocator.free(path); // initAt dupes it, so free our copy
         return initAt(allocator, path);
     }
@@ -75,7 +86,7 @@ pub const State = struct {
         if (root != .object) return;
 
         // Load tools
-        if (root.object.get("tools")) |tools_val| {
+        if (root.object.get(json_key_tools)) |tools_val| {
             if (tools_val == .object) {
                 var it = tools_val.object.iterator();
                 while (it.next()) |kv| {
@@ -84,12 +95,12 @@ pub const State = struct {
                     if (tv != .object) continue;
 
                     const entry = ToolEntry{
-                        .version = if (tv.object.get("version")) |v| if (v == .string) v.string else "" else "",
-                        .installed_at = if (tv.object.get("installed_at")) |v| if (v == .string) v.string else "" else "",
-                        .method = if (tv.object.get("method")) |v| if (v == .string) v.string else "" else "",
-                        .source = if (tv.object.get("source")) |v| if (v == .string) v.string else "" else "",
-                        .status = if (tv.object.get("status")) |v| if (v == .string) v.string else "installed" else "installed",
-                        .pinned = if (tv.object.get("pinned")) |v| if (v == .bool) v.bool else false else false,
+                        .version = if (tv.object.get(json_key_version)) |v| if (v == .string) v.string else "" else "",
+                        .installed_at = if (tv.object.get(json_key_installed_at)) |v| if (v == .string) v.string else "" else "",
+                        .method = if (tv.object.get(json_key_method)) |v| if (v == .string) v.string else "" else "",
+                        .source = if (tv.object.get(json_key_source)) |v| if (v == .string) v.string else "" else "",
+                        .status = if (tv.object.get(json_key_status)) |v| if (v == .string) v.string else default_tool_status else default_tool_status,
+                        .pinned = if (tv.object.get(json_key_pinned)) |v| if (v == .bool) v.bool else false else false,
                     };
 
                     try self.tools.put(tool_name, entry);
@@ -177,7 +188,7 @@ pub const State = struct {
             .installed_at = installed_at,
             .method = try arena_alloc.dupe(u8, method),
             .source = source,
-            .status = "installed",
+            .status = default_tool_status,
             .pinned = pinned,
         });
         try self.save();

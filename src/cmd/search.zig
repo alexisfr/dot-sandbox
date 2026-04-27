@@ -3,6 +3,9 @@ const tool_mod = @import("../tool.zig");
 const output = @import("../ui/output.zig");
 const util = @import("../util.zig");
 
+const rank_no_match: u8 = 255;
+const suggestion_distance_threshold = 3;
+
 const help =
     \\Usage: dot search <query>
     \\
@@ -45,7 +48,7 @@ pub fn run(
 
     for (tools) |*t| {
         const r = rank(t, query);
-        if (r < 255) try results.append(allocator, .{ .tool = t, .rank = r });
+        if (r < rank_no_match) try results.append(allocator, .{ .tool = t, .rank = r });
     }
 
     // Sort: rank asc, then name asc
@@ -64,7 +67,7 @@ pub fn run(
             const d = util.editDistance(query, t.id);
             if (d < best_dist) { best_dist = d; best = t; }
         }
-        if (best_dist <= 3) {
+        if (best_dist <= suggestion_distance_threshold) {
             if (best) |b| {
                 output.printSectionHeaderFmt("No exact match for \"{s}\". Did you mean:", .{query});
                 output.printFmt("\n  {s}{s:<14}{s}  {s}\n\n", .{ output.bold, b.id, output.reset, b.description });
@@ -142,7 +145,7 @@ fn rank(t: *const tool_mod.Tool, query: []const u8) u8 {
     // Rank 4: editDistance ≤ 2 on id
     if (util.editDistance(t.id, q_lower) <= 2) return 4;
 
-    return 255;
+    return rank_no_match;
 }
 
 fn containsIgnoreCase(haystack: []const u8, needle: []const u8) bool {

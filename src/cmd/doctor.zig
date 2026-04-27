@@ -6,6 +6,8 @@ const output = @import("../ui/output.zig");
 const io_ctx = @import("../io_ctx.zig");
 const shell_mod = @import("../shell.zig");
 const install_mod = @import("install.zig");
+const paths = @import("../paths.zig");
+const env = @import("../env.zig");
 
 const help =
     \\Usage: dot doctor
@@ -127,9 +129,9 @@ fn isInvocation(line: []const u8, tool_id: []const u8) bool {
 /// Returns true if the shell's RC file contains the dot source marker.
 fn rcHasSourceMarker(shell: platform.Shell, home: []const u8, allocator: std.mem.Allocator) bool {
     const rc_path: []u8 = switch (shell) {
-        .bash => std.fs.path.join(allocator, &.{ home, ".bashrc" }) catch return false,
-        .zsh => std.fs.path.join(allocator, &.{ home, ".zshrc" }) catch return false,
-        .fish => std.fs.path.join(allocator, &.{ home, ".config", "fish", "config.fish" }) catch return false,
+        .bash => std.fs.path.join(allocator, &.{ home, shell_mod.bash_rc_file }) catch return false,
+        .zsh => std.fs.path.join(allocator, &.{ home, shell_mod.zsh_rc_file }) catch return false,
+        .fish => std.fs.path.join(allocator, &.{ home, paths.config_dir, shell_mod.fish_config_dir, shell_mod.fish_config_file }) catch return false,
         .unknown => return true,
     };
     defer allocator.free(rc_path);
@@ -162,7 +164,7 @@ pub fn run(
     var warn: usize = 0;
     var fail: usize = 0;
 
-    const home = @import("../env.zig").getenv("HOME") orelse "/tmp";
+    const home = env.getenv("HOME") orelse paths.fallback_home;
 
     // System checks
     output.printSectionHeader("System");
@@ -187,8 +189,8 @@ pub fn run(
         warn += 1;
     }
 
-    const path_env = @import("../env.zig").getenv("PATH") orelse "";
-    const local_bin_abs = std.fs.path.join(allocator, &.{ home, ".local", "bin" }) catch null;
+    const path_env = env.getenv("PATH") orelse "";
+    const local_bin_abs = std.fs.path.join(allocator, &.{ home, paths.local_dir, paths.bin_dir }) catch null;
     if (local_bin_abs) |lb| {
         defer allocator.free(lb);
         if (std.mem.indexOf(u8, path_env, lb) != null) {
@@ -206,7 +208,7 @@ pub fn run(
     var tool_iter = state.tools.iterator();
     while (tool_iter.next()) |kv| {
         const tool_id = kv.key_ptr.*;
-        const bin_path = std.fs.path.join(allocator, &.{ home, ".local", "bin", tool_id }) catch continue;
+        const bin_path = std.fs.path.join(allocator, &.{ home, paths.local_dir, paths.bin_dir, tool_id }) catch continue;
         defer allocator.free(bin_path);
 
         if (std.Io.Dir.cwd().access(io_ctx.get(), bin_path, .{})) |_| {
@@ -265,7 +267,7 @@ pub fn run(
     var unmanaged_count: usize = 0;
     for (tools) |t| {
         if (state.isInstalled(t.id)) continue;
-        const bin_path = std.fs.path.join(allocator, &.{ home, ".local", "bin", t.id }) catch continue;
+        const bin_path = std.fs.path.join(allocator, &.{ home, paths.local_dir, paths.bin_dir, t.id }) catch continue;
         defer allocator.free(bin_path);
         std.Io.Dir.cwd().access(io_ctx.get(), bin_path, .{}) catch continue;
         const detail = std.fmt.allocPrint(allocator, "found in ~/.local/bin — run: dot install {s}", .{t.id}) catch null;
@@ -283,7 +285,7 @@ pub fn run(
     const all_shells = [_]platform.Shell{ .bash, .zsh, .fish };
     for (all_shells) |check_sh| {
         const integ_path = std.fs.path.join(allocator, &.{
-            home, ".local", "bin", check_sh.integrationFileName(),
+            home, paths.local_dir, paths.bin_dir, check_sh.integrationFileName(),
         }) catch continue;
         defer allocator.free(integ_path);
 

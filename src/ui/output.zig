@@ -1,4 +1,5 @@
 const std = @import("std");
+const env = @import("../env.zig");
 
 // ─── Render mode ──────────────────────────────────────────────────────────────
 
@@ -14,8 +15,8 @@ var render_mode: RenderMode = .rich;
 
 /// Detect terminal capabilities. Call once at program startup before any output.
 pub fn initCaps() void {
-    const no_color = @import("../env.zig").getenv("NO_COLOR") != null;
-    const dumb_term = if (@import("../env.zig").getenv("TERM")) |t| std.mem.eql(u8, t, "dumb") else false;
+    const no_color = env.getenv("NO_COLOR") != null;
+    const dumb_term = if (env.getenv("TERM")) |t| std.mem.eql(u8, t, "dumb") else false;
     const is_tty = if (std.posix.tcgetattr(2)) |_| true else |_| false; // fd 2 = stderr
 
     render_mode = if (!is_tty) .pipe else if (no_color or dumb_term) .plain else .rich;

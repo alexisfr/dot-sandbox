@@ -4,6 +4,9 @@ const io_ctx = @import("../io_ctx.zig");
 
 /// Minimum milliseconds between redraws. Prevents flickering on fast connections.
 const redraw_interval_ms: i64 = 50; // 20 fps max
+const progress_bar_width: usize = 67;
+const bytes_per_mb: u64 = 1024 * 1024;
+const bytes_per_kb: u64 = 1024;
 
 /// Download progress: brew-style `###...100.0%` fill bar.
 ///
@@ -53,7 +56,7 @@ pub const ProgressBar = struct {
         if (total) |t| {
             // pct in tenths of a percent (0–1000) so we can print "X.Y%"
             const pct: u64 = if (t > 0) @min(current * 1000 / t, 1000) else 0;
-            const bar_width: usize = 67;
+            const bar_width = progress_bar_width;
             const filled: usize = @intCast(pct * bar_width / 1000);
             writer.print("{s}   ", .{line_start}) catch return;
             var i: usize = 0;
@@ -94,13 +97,13 @@ pub const ProgressBar = struct {
 };
 
 pub fn fmtBytes(bytes: u64, buf: []u8) []const u8 {
-    if (bytes >= 1024 * 1024) {
-        const megabytes = bytes / (1024 * 1024);
-        const frac = (bytes % (1024 * 1024)) * 10 / (1024 * 1024);
+    if (bytes >= bytes_per_mb) {
+        const megabytes = bytes / bytes_per_mb;
+        const frac = (bytes % bytes_per_mb) * 10 / bytes_per_mb;
         return std.fmt.bufPrint(buf, "{d}.{d} MB", .{ megabytes, frac }) catch "???";
-    } else if (bytes >= 1024) {
-        const kilobytes = bytes / 1024;
-        const frac = (bytes % 1024) * 10 / 1024;
+    } else if (bytes >= bytes_per_kb) {
+        const kilobytes = bytes / bytes_per_kb;
+        const frac = (bytes % bytes_per_kb) * 10 / bytes_per_kb;
         return std.fmt.bufPrint(buf, "{d}.{d} KB", .{ kilobytes, frac }) catch "???";
     } else {
         return std.fmt.bufPrint(buf, "{d} B", .{bytes}) catch "???";
@@ -190,21 +193,21 @@ test "ProgressBar: finish without any update leaves rendered=false" {
 
 test "fill bar: 0% shows empty bar" {
     const pct: u64 = 0;
-    const bar_width: usize = 67;
+    const bar_width = progress_bar_width;
     const filled: usize = @intCast(pct * bar_width / 1000);
     try std.testing.expectEqual(@as(usize, 0), filled);
 }
 
 test "fill bar: 50% fills half the bar" {
     const pct: u64 = 500; // tenths — 500 = 50.0%
-    const bar_width: usize = 67;
+    const bar_width = progress_bar_width;
     const filled: usize = @intCast(pct * bar_width / 1000);
     try std.testing.expectEqual(@as(usize, 33), filled);
 }
 
 test "fill bar: 100% fills full bar" {
     const pct: u64 = 1000; // tenths — 1000 = 100.0%
-    const bar_width: usize = 67;
+    const bar_width = progress_bar_width;
     const filled: usize = @intCast(pct * bar_width / 1000);
     try std.testing.expectEqual(@as(usize, 67), filled);
 }

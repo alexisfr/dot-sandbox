@@ -1,40 +1,49 @@
 const std = @import("std");
 const platform = @import("platform.zig");
 const io_ctx = @import("io_ctx.zig");
+const paths = @import("paths.zig");
+const env = @import("env.zig");
 
 pub const source_marker = "# dot: source shell integration";
+pub const bash_rc_file = ".bashrc";
+pub const zsh_rc_file = ".zshrc";
+pub const fish_config_dir = "fish";
+pub const fish_config_file = "config.fish";
 const path_marker = "# dot: add local bin to PATH";
 
 /// Ensure the centralized integration file is sourced from the shell's RC.
 /// Idempotent.
 pub fn ensureSourced(shell: platform.Shell, allocator: std.mem.Allocator) !void {
-    const home = @import("env.zig").getenv("HOME") orelse return error.NoHome;
+    const home = env.getenv("HOME") orelse return error.NoHome;
 
     const rc_path = switch (shell) {
-        .bash => try std.fs.path.join(allocator, &.{ home, ".bashrc" }),
-        .zsh => try std.fs.path.join(allocator, &.{ home, ".zshrc" }),
-        .fish => try std.fs.path.join(allocator, &.{ home, ".config", "fish", "config.fish" }),
+        .bash => try std.fs.path.join(allocator, &.{ home, bash_rc_file }),
+        .zsh => try std.fs.path.join(allocator, &.{ home, zsh_rc_file }),
+        .fish => try std.fs.path.join(allocator, &.{ home, paths.config_dir, fish_config_dir, fish_config_file }),
         .unknown => return,
     };
     defer allocator.free(rc_path);
 
     const integration_path = try std.fs.path.join(
         allocator,
-        &.{ home, ".local", "bin", shell.integrationFileName() },
+        &.{ home, paths.local_dir, paths.bin_dir, shell.integrationFileName() },
     );
     defer allocator.free(integration_path);
 
     // Ensure integration file exists (open without truncating; create only if absent)
     const integ_dir = std.fs.path.dirname(integration_path) orelse return error.InvalidIntegrationPath;
-    const io = io_ctx.get();
-    try std.Io.Dir.cwd().createDirPath(io, integ_dir);
-    const integ_file = std.Io.Dir.cwd().openFile(io, integration_path, .{}) catch |e| switch (e) {
-        error.FileNotFound => try std.Io.Dir.cwd().createFile(io, integration_path, .{}),
-        else => return e,
-    };
-    integ_file.close(io);
+    {
+        const io = io_ctx.get();
+        try std.Io.Dir.cwd().createDirPath(io, integ_dir);
+        const integ_file = std.Io.Dir.cwd().openFile(io, integration_path, .{}) catch |e| switch (e) {
+            error.FileNotFound => try std.Io.Dir.cwd().createFile(io, integration_path, .{}),
+            else => return e,
+        };
+        integ_file.close(io);
+    }
 
     // Check if RC already sources our file
+    const io = io_ctx.get();
     const rc_content = std.Io.Dir.cwd().openFile(io, rc_path, .{}) catch |e| switch (e) {
         error.FileNotFound => {
             // Create RC and add source line
@@ -71,10 +80,10 @@ pub fn addSection(
     config: []const u8,
     allocator: std.mem.Allocator,
 ) !void {
-    const home = @import("env.zig").getenv("HOME") orelse return error.NoHome;
+    const home = env.getenv("HOME") orelse return error.NoHome;
     const integration_path = try std.fs.path.join(
         allocator,
-        &.{ home, ".local", "bin", shell.integrationFileName() },
+        &.{ home, paths.local_dir, paths.bin_dir, shell.integrationFileName() },
     );
     defer allocator.free(integration_path);
 
@@ -119,10 +128,10 @@ pub fn removeSection(
     tool_name: []const u8,
     allocator: std.mem.Allocator,
 ) !void {
-    const home = @import("env.zig").getenv("HOME") orelse return error.NoHome;
+    const home = env.getenv("HOME") orelse return error.NoHome;
     const integration_path = try std.fs.path.join(
         allocator,
-        &.{ home, ".local", "bin", shell.integrationFileName() },
+        &.{ home, paths.local_dir, paths.bin_dir, shell.integrationFileName() },
     );
     defer allocator.free(integration_path);
 
@@ -280,7 +289,7 @@ fn ensurePathInIntegration(
 
     if (std.mem.indexOf(u8, content, path_marker) != null) return;
 
-    const bin_dir = try std.fs.path.join(allocator, &.{ home, ".local", "bin" });
+    const bin_dir = try std.fs.path.join(allocator, &.{ home, paths.local_dir, paths.bin_dir });
     defer allocator.free(bin_dir);
 
     const path_line = try shell.pathAddSyntax(bin_dir, allocator);

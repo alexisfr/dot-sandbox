@@ -8,6 +8,8 @@ const tool_mod = @import("../tool.zig");
 const version_mod = @import("../version.zig");
 const progress_mod = @import("../ui/progress.zig");
 const io_ctx = @import("../io_ctx.zig");
+const paths = @import("../paths.zig");
+const env = @import("../env.zig");
 
 const help =
     \\Usage: dot update [--force]
@@ -90,7 +92,7 @@ pub fn run(
     defer allocator.free(url);
 
     // Temp directory for download and extraction
-    const tmp_dir = try std.fmt.allocPrint(allocator, "/tmp/dot-update-{s}", .{latest});
+    const tmp_dir = try std.fmt.allocPrint(allocator, paths.fallback_home ++ "/dot-update-{s}", .{latest});
     defer allocator.free(tmp_dir);
     const io = io_ctx.get();
     std.Io.Dir.cwd().createDirPath(io, tmp_dir) catch {};
@@ -110,7 +112,7 @@ pub fn run(
             404 => "release asset not found — the binary may not exist for your platform yet",
             403 => "access denied — repository may be private",
             0 => @errorName(e),
-            else => std.fmt.bufPrint(&status_buf, "HTTP {d}", .{http.last_status}) catch @errorName(e),
+            else => std.fmt.bufPrint(&status_buf, "HTTP {d}", .{http.last_status}) catch unreachable,
         };
         output.printStep("Download", output.sym_fail, hint);
         output.printFmt("  URL: {s}\n", .{url});
@@ -133,14 +135,14 @@ pub fn run(
     defer allocator.free(src_bin);
 
     // Install path
-    const home = @import("../env.zig").getenv("HOME") orelse "/tmp";
-    const bin_dir = try std.fs.path.join(allocator, &.{ home, ".local", "bin" });
+    const home = env.getenv("HOME") orelse paths.fallback_home;
+    const bin_dir = try std.fs.path.join(allocator, &.{ home, paths.local_dir, paths.bin_dir });
     defer allocator.free(bin_dir);
     std.Io.Dir.cwd().createDirPath(io, bin_dir) catch {};
 
     const dest = try std.fs.path.join(allocator, &.{ bin_dir, "dot" });
     defer allocator.free(dest);
-    const tmp_dest = try std.fmt.allocPrint(allocator, "{s}.new", .{dest});
+    const tmp_dest = try std.fmt.allocPrint(allocator, "{s}" ++ paths.new_file_suffix, .{dest});
     defer allocator.free(tmp_dest);
 
     // Copy, chmod, atomic rename
@@ -166,7 +168,7 @@ pub fn run(
     output.printDetail(dest);
 
     // Update state
-    try state.addTool("dot", latest, "github_release", false);
+    try state.addTool("dot", latest, tool_mod.method_github_release, false);
 }
 
 fn progressCbFn(ctx: *anyopaque, done: u64, total: ?u64) void {

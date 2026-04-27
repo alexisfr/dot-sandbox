@@ -9,6 +9,10 @@ const util = @import("../util.zig");
 const http = @import("../http.zig");
 const progress_mod = @import("../ui/progress.zig");
 const io_ctx = @import("../io_ctx.zig");
+const paths = @import("../paths.zig");
+const env = @import("../env.zig");
+
+const suggestion_distance_threshold = 3;
 
 fn progressCbFn(ctx: *anyopaque, done: u64, total: ?u64) void {
     const bar: *progress_mod.ProgressBar = @ptrCast(@alignCast(ctx));
@@ -281,11 +285,11 @@ fn installTool(
 
     if (!used_brew) {
         // Native install path: download, extract, copy binary
-        const home = @import("../env.zig").getenv("HOME") orelse "/tmp";
-        const bin_dir = try std.fs.path.join(allocator, &.{ home, ".local", "bin" });
+        const home = env.getenv("HOME") orelse paths.fallback_home;
+        const bin_dir = try std.fs.path.join(allocator, &.{ home, paths.local_dir, paths.bin_dir });
         defer allocator.free(bin_dir);
 
-        const tmp_dir = try std.fmt.allocPrint(allocator, "/tmp/dot-{s}-{s}", .{ tool.id, version });
+        const tmp_dir = try std.fmt.allocPrint(allocator, paths.fallback_home ++ "/dot-{s}-{s}", .{ tool.id, version });
         defer allocator.free(tmp_dir);
 
         const io = io_ctx.get();
@@ -315,7 +319,7 @@ fn installTool(
                 404 => "release asset not found — tool may not support your platform",
                 403 => "access denied — repository may be private",
                 0 => @errorName(e),
-                else => std.fmt.bufPrint(&status_buf, "HTTP {d}", .{http.last_status}) catch @errorName(e),
+                else => std.fmt.bufPrint(&status_buf, "HTTP {d}", .{http.last_status}) catch unreachable,
             } else @errorName(e);
             output.printStep("Installation", output.sym_fail, hint);
             if (e == error.HttpError and http.last_url.len > 0) output.printFmt("  URL: {s}\n", .{http.last_url});
@@ -379,7 +383,7 @@ fn installTool(
     }
 
     // Update state — pin if the user specified an explicit version
-    const method = if (used_brew) "brew" else @tagName(tool.strategy);
+    const method = if (used_brew) tool_mod.method_brew else @tagName(tool.strategy);
     try state.addTool(tool.id, version, method, version_arg != null);
 
     if (shell_written) printShellReloadHint(platform.Shell.detect());
@@ -472,8 +476,8 @@ fn brewInstall(allocator: std.mem.Allocator, formula: []const u8, force: bool) !
 
 /// Returns owned path string if tool is found in system PATH outside ~/.local/bin.
 fn checkSystemInstall(allocator: std.mem.Allocator, id: []const u8) ?[]u8 {
-    const home = @import("../env.zig").getenv("HOME") orelse return null;
-    const our_path = std.fs.path.join(allocator, &.{ home, ".local", "bin", id }) catch return null;
+    const home = env.getenv("HOME") orelse return null;
+    const our_path = std.fs.path.join(allocator, &.{ home, paths.local_dir, paths.bin_dir, id }) catch return null;
     defer allocator.free(our_path);
 
     const result = std.process.run(allocator, io_ctx.get(), .{
@@ -575,7 +579,7 @@ pub fn printGroupToolSeparator(name: []const u8, index: usize, total: usize) voi
 /// Return the closest tool id if within edit distance 2, otherwise null.
 fn closestTool(id: []const u8, tools: []const tool_mod.Tool) ?[]const u8 {
     var best: ?[]const u8 = null;
-    var best_dist: usize = 3; // threshold: suggest only if dist < 3
+    var best_dist: usize = suggestion_distance_threshold;
     for (tools) |t| {
         const distance = util.editDistance(id, t.id);
         if (distance < best_dist) {

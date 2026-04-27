@@ -27,7 +27,7 @@ pub fn extractTarXz(archive_path: []const u8, dest_path: []const u8, strip_compo
     const io = io_ctx.get();
     try std.Io.Dir.cwd().createDirPath(io, dest_path);
     var strip_buf: [16]u8 = undefined;
-    const strip_str = std.fmt.bufPrint(&strip_buf, "{d}", .{strip_components}) catch "0";
+    const strip_str = std.fmt.bufPrint(&strip_buf, "{d}", .{strip_components}) catch unreachable;
     const result = try std.process.run(allocator, io_ctx.get(), .{
         .argv = &.{ "tar", "-xJf", archive_path, "-C", dest_path, "--strip-components", strip_str },
     });

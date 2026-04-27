@@ -1,5 +1,9 @@
 const std = @import("std");
 const io_ctx = @import("io_ctx.zig");
+const paths = @import("paths.zig");
+
+const http_success_min = 200;
+const http_success_max = 300;
 
 pub const Error = error{
     HttpError,
@@ -35,7 +39,7 @@ pub fn get(allocator: std.mem.Allocator, url: []const u8) ![]u8 {
     });
 
     const code = @intFromEnum(result.status);
-    if (code < 200 or code >= 300) {
+    if (code < http_success_min or code >= http_success_max) {
         last_status = @intCast(code);
         last_url = url;
         return error.HttpError;
@@ -58,7 +62,7 @@ pub fn download(
         std.Io.Dir.cwd().createDirPath(io, dir) catch {};
     }
 
-    const tmp_path = try std.fmt.allocPrint(allocator, "{s}.tmp", .{dest_path});
+    const tmp_path = try std.fmt.allocPrint(allocator, "{s}" ++ paths.tmp_file_ext, .{dest_path});
     defer allocator.free(tmp_path);
 
     errdefer std.Io.Dir.cwd().deleteFile(io, tmp_path) catch {};
@@ -81,7 +85,7 @@ pub fn download(
     var response = try req.receiveHead(&redirect_buf);
 
     const code = @intFromEnum(response.head.status);
-    if (code < 200 or code >= 300) {
+    if (code < http_success_min or code >= http_success_max) {
         last_status = @intCast(code);
         last_url = url;
         return error.HttpError;

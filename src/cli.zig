@@ -38,10 +38,10 @@ const help =
     \\  unpin       Unpin a tool to resume automatic upgrades
     \\  update      Update dot itself to the latest release
     \\  upgrade     Upgrade installed tools
+    \\  version     Show version
     \\
     \\Options:
-    \\  --version, -v    Show version
-    \\  --help, -h       Show this help
+    \\  --help, -h  Show this help
     \\
     \\Run 'dot <command> --help' for more information on a specific command.
     \\
@@ -57,7 +57,7 @@ pub fn run(allocator: std.mem.Allocator, argv: []const [:0]const u8) !void {
 
     const command: []const u8 = argv[1];
 
-    if (std.mem.eql(u8, command, "--version") or std.mem.eql(u8, command, "-v")) {
+    if (std.mem.eql(u8, command, "version") or std.mem.eql(u8, command, "--version") or std.mem.eql(u8, command, "-v")) {
         output.printRaw(version_str);
         return;
     }
@@ -161,7 +161,7 @@ pub fn run(allocator: std.mem.Allocator, argv: []const [:0]const u8) !void {
     }
 
     // Suggest the closest known command if the edit distance is small enough.
-    const known = [_][]const u8{ "list", "install", "uninstall", "upgrade", "update", "doctor", "repository", "info", "search", "outdated", "groups", "pin", "unpin" };
+    const known = [_][]const u8{ "list", "install", "uninstall", "upgrade", "update", "doctor", "repository", "info", "search", "outdated", "groups", "pin", "unpin", "version" };
     var best_dist: usize = std.math.maxInt(usize);
     var best_cmd: []const u8 = "";
     for (known) |known_cmd| {

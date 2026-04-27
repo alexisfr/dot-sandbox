@@ -2,6 +2,22 @@ const std = @import("std");
 const tool = @import("../tool.zig");
 const http = @import("../http.zig");
 const io_ctx = @import("../io_ctx.zig");
+const paths = @import("../paths.zig");
+
+const cache_staleness_secs = 86400;
+const repositories_config_file = "repositories.json";
+const cache_file_template = "repository-{s}.json";
+
+// Version source type strings (used in parseVersionSource comparisons)
+const vs_type_github_release = "github_release";
+const vs_type_hashicorp = "hashicorp";
+const vs_type_k8s_stable_txt = "k8s_stable_txt";
+const vs_type_pypi = "pypi";
+const vs_type_static = "static";
+const vs_type_gcloud_sdk = "gcloud_sdk";
+const vs_type_github_tags = "github_tags";
+const vs_type_ziglang = "ziglang";
+const vs_type_go_dl = "go_dl";
 
 const builtin_repo_name = "the-devops-hub";
 const builtin_repo_url = "https://raw.githubusercontent.com/the-devops-hub/dot/main/src/repository/builtin-repository.json";
@@ -28,7 +44,7 @@ pub fn loadBuiltinTools(allocator: std.mem.Allocator) !ExternalTools {
         defer cache_file.close(stat_io);
         const file_stat = cache_file.stat(stat_io) catch break :blk true;
         const mtime_s = file_stat.mtime.toSeconds();
-        break :blk now - mtime_s > 86400;
+        break :blk now - mtime_s > cache_staleness_secs;
     };
 
     if (stale) {
@@ -66,7 +82,7 @@ pub const ExternalTools = struct {
 /// Return path to ~/.config/dot. Caller owns result.
 pub fn configDir(allocator: std.mem.Allocator) ![]u8 {
     const home = @import("../env.zig").getenv("HOME") orelse return error.NoHome;
-    return std.fs.path.join(allocator, &.{ home, ".config", "dot" });
+    return std.fs.path.join(allocator, &.{ home, paths.config_dir, paths.dot_config_subdir });
 }
 
 /// Load and return all external tools from registered repository sources.
@@ -87,7 +103,7 @@ pub fn loadExternalTools(allocator: std.mem.Allocator) !ExternalTools {
         const now = std.Io.Timestamp.now(io_ctx.get(), .real).toSeconds();
         const fetched_at_n = std.fmt.parseInt(i64, source.fetched_at, 10) catch 0;
 
-        if (now - fetched_at_n > 86400) {
+        if (now - fetched_at_n > cache_staleness_secs) {
             fetchAndCache(allocator, source.name, source.url) catch {};
         }
 
@@ -107,7 +123,7 @@ pub fn loadRepositories(arena: std.mem.Allocator, allocator: std.mem.Allocator) 
     const dir = try configDir(allocator);
     defer allocator.free(dir);
 
-    const path = try std.fs.path.join(allocator, &.{ dir, "repositories.json" });
+    const path = try std.fs.path.join(allocator, &.{ dir, repositories_config_file });
     defer allocator.free(path);
 
     const repos_io = io_ctx.get();
@@ -162,7 +178,7 @@ pub fn saveRepositories(allocator: std.mem.Allocator, sources: []const Repositor
     const save_io = io_ctx.get();
     try std.Io.Dir.cwd().createDirPath(save_io, dir);
 
-    const path = try std.fs.path.join(allocator, &.{ dir, "repositories.json" });
+    const path = try std.fs.path.join(allocator, &.{ dir, repositories_config_file });
     defer allocator.free(path);
 
     var buf: std.ArrayList(u8) = .empty;
@@ -198,7 +214,7 @@ pub fn fetchAndCache(allocator: std.mem.Allocator, name: []const u8, url: []cons
     const fetch_io = io_ctx.get();
     try std.Io.Dir.cwd().createDirPath(fetch_io, dir);
 
-    const filename = try std.fmt.allocPrint(allocator, "repository-{s}.json", .{name});
+    const filename = try std.fmt.allocPrint(allocator, cache_file_template, .{name});
     defer allocator.free(filename);
 
     const path = try std.fs.path.join(allocator, &.{ dir, filename });
@@ -238,7 +254,7 @@ fn loadCachedTools(arena: std.mem.Allocator, allocator: std.mem.Allocator, name:
     const dir = try configDir(allocator);
     defer allocator.free(dir);
 
-    const filename = try std.fmt.allocPrint(allocator, "repository-{s}.json", .{name});
+    const filename = try std.fmt.allocPrint(allocator, cache_file_template, .{name});
     defer allocator.free(filename);
 
     const path = try std.fs.path.join(allocator, &.{ dir, filename });
@@ -392,7 +408,7 @@ fn parseVersionSource(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.V
     if (type_val != .string) return error.InvalidType;
     const type_str = type_val.string;
 
-    if (std.mem.eql(u8, type_str, "github_release")) {
+    if (std.mem.eql(u8, type_str, vs_type_github_release)) {
         const repo_val = obj.get("repo") orelse return error.MissingRepo;
         if (repo_val != .string) return error.InvalidRepo;
         return .{ .github_release = .{
@@ -401,27 +417,27 @@ fn parseVersionSource(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.V
             .strip_prefix = if (obj.get("strip_prefix")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
             .require_asset = if (obj.get("require_asset")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
         } };
-    } else if (std.mem.eql(u8, type_str, "hashicorp")) {
+    } else if (std.mem.eql(u8, type_str, vs_type_hashicorp)) {
         const prod = obj.get("product") orelse return error.MissingProduct;
         if (prod != .string) return error.InvalidProduct;
         return .{ .hashicorp = .{ .product = try arena.dupe(u8, prod.string) } };
-    } else if (std.mem.eql(u8, type_str, "k8s_stable_txt")) {
+    } else if (std.mem.eql(u8, type_str, vs_type_k8s_stable_txt)) {
         return .{ .k8s_stable_txt = {} };
-    } else if (std.mem.eql(u8, type_str, "pypi")) {
+    } else if (std.mem.eql(u8, type_str, vs_type_pypi)) {
         const pkg = obj.get("package") orelse return error.MissingPackage;
         if (pkg != .string) return error.InvalidPackage;
         return .{ .pypi = .{ .package = try arena.dupe(u8, pkg.string) } };
-    } else if (std.mem.eql(u8, type_str, "static")) {
+    } else if (std.mem.eql(u8, type_str, vs_type_static)) {
         const ver = obj.get("version") orelse return error.MissingVersion;
         if (ver != .string) return error.InvalidVersion;
         return .{ .static = .{ .version = try arena.dupe(u8, ver.string) } };
-    } else if (std.mem.eql(u8, type_str, "gcloud_sdk")) {
+    } else if (std.mem.eql(u8, type_str, vs_type_gcloud_sdk)) {
         return .{ .gcloud_sdk = {} };
-    } else if (std.mem.eql(u8, type_str, "ziglang")) {
+    } else if (std.mem.eql(u8, type_str, vs_type_ziglang)) {
         return .{ .ziglang = {} };
-    } else if (std.mem.eql(u8, type_str, "go_dl")) {
+    } else if (std.mem.eql(u8, type_str, vs_type_go_dl)) {
         return .{ .go_dl = {} };
-    } else if (std.mem.eql(u8, type_str, "github_tags")) {
+    } else if (std.mem.eql(u8, type_str, vs_type_github_tags)) {
         const repo_val = obj.get("repo") orelse return error.MissingRepo;
         if (repo_val != .string) return error.InvalidRepo;
         return .{ .github_tags = .{
@@ -440,7 +456,7 @@ fn parseStrategy(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.Instal
     if (type_val != .string) return error.InvalidType;
     const type_str = type_val.string;
 
-    if (std.mem.eql(u8, type_str, "github_release")) {
+    if (std.mem.eql(u8, type_str, tool.method_github_release)) {
         const url_tmpl = obj.get("url_template") orelse return error.MissingUrlTemplate;
         if (url_tmpl != .string) return error.InvalidUrlTemplate;
         const bin = if (obj.get("binary_in_archive")) |v| if (v == .string) try arena.dupe(u8, v.string) else "" else "";
@@ -450,15 +466,15 @@ fn parseStrategy(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.Instal
             .binary_in_archive = bin,
             .checksum_url_template = csum,
         } };
-    } else if (std.mem.eql(u8, type_str, "direct_binary")) {
+    } else if (std.mem.eql(u8, type_str, tool.method_direct_binary)) {
         const url_tmpl = obj.get("url_template") orelse return error.MissingUrlTemplate;
         if (url_tmpl != .string) return error.InvalidUrlTemplate;
         return .{ .direct_binary = .{ .url_template = try arena.dupe(u8, url_tmpl.string) } };
-    } else if (std.mem.eql(u8, type_str, "hashicorp_release")) {
+    } else if (std.mem.eql(u8, type_str, tool.method_hashicorp)) {
         const prod = obj.get("product") orelse return error.MissingProduct;
         if (prod != .string) return error.InvalidProduct;
         return .{ .hashicorp_release = .{ .product = try arena.dupe(u8, prod.string) } };
-    } else if (std.mem.eql(u8, type_str, "system_package")) {
+    } else if (std.mem.eql(u8, type_str, tool.method_system_package)) {
         return .{ .system_package = .{
             .pacman = if (obj.get("pacman")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
             .apt = if (obj.get("apt")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
@@ -470,7 +486,7 @@ fn parseStrategy(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.Instal
             .flatpak = if (obj.get("flatpak")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
             .snap = if (obj.get("snap")) |v| if (v == .string) try arena.dupe(u8, v.string) else null else null,
         } };
-    } else if (std.mem.eql(u8, type_str, "pip_venv")) {
+    } else if (std.mem.eql(u8, type_str, tool.method_pip_venv)) {
         const pkg = obj.get("package") orelse return error.MissingPackage;
         if (pkg != .string) return error.InvalidPackage;
         const dir = obj.get("install_dir_rel") orelse return error.MissingInstallDir;
@@ -492,7 +508,7 @@ fn parseStrategy(arena: std.mem.Allocator, obj: std.json.ObjectMap) !tool.Instal
             .binary_name = try arena.dupe(u8, bin.string),
             .extra_binaries = extra_binaries,
         } };
-    } else if (std.mem.eql(u8, type_str, "tarball")) {
+    } else if (std.mem.eql(u8, type_str, tool.method_tarball)) {
         const url_tmpl = obj.get("url_template") orelse return error.MissingUrlTemplate;
         if (url_tmpl != .string) return error.InvalidUrlTemplate;
         const strip: u32 = if (obj.get("strip_components")) |v| switch (v) {

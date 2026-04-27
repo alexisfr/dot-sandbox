@@ -4,8 +4,33 @@ const platform = @import("platform.zig");
 const archive = @import("archive.zig");
 const output = @import("ui/output.zig");
 const io_ctx = @import("io_ctx.zig");
+const paths = @import("paths.zig");
+const env = @import("env.zig");
 
 pub const Group = enum { k8s, cloud, iac, containers, utils, terminal, cm, security, dev };
+
+// ─── Install method names (serialized into state.json) ────────────────────────
+pub const method_github_release = "github_release";
+pub const method_direct_binary  = "direct_binary";
+pub const method_hashicorp      = "hashicorp_release";
+pub const method_system_package = "system_package";
+pub const method_pip_venv       = "pip_venv";
+pub const method_tarball        = "tarball";
+pub const method_brew           = "brew";
+
+// ─── Version-source API endpoints ─────────────────────────────────────────────
+const github_api_releases_url  = "https://api.github.com/repos/{s}/releases";
+const github_api_tags_url      = "https://api.github.com/repos/{s}/tags";
+const hashicorp_checkpoint_url = "https://checkpoint-api.hashicorp.com/v1/check/{s}";
+const k8s_stable_txt_url       = "https://dl.k8s.io/release/stable.txt";
+const pypi_json_url            = "https://pypi.org/pypi/{s}/json";
+const gcloud_components_url    = "https://dl.google.com/dl/cloudsdk/channels/rapid/components-2.json";
+const ziglang_index_url        = "https://ziglang.org/download/index.json";
+const go_downloads_url         = "https://go.dev/dl/?mode=json";
+/// Key in the Zig download index that represents the development build; excluded from version resolution
+const ziglang_master_key       = "master";
+/// Prefix stripped from Go version strings (e.g. "go1.22.0" → "1.22.0")
+const go_version_prefix        = "go";
 
 // ─── Version resolution ───────────────────────────────────────────────────────
 
@@ -62,7 +87,7 @@ pub const VersionSource = union(enum) {
     fn resolveGithub(allocator: std.mem.Allocator, gh: GithubRelease) ![]u8 {
         const url = try std.fmt.allocPrint(
             allocator,
-            "https://api.github.com/repos/{s}/releases",
+            github_api_releases_url,
             .{gh.repo},
         );
         defer allocator.free(url);
@@ -113,7 +138,7 @@ pub const VersionSource = union(enum) {
     fn resolveHashicorp(allocator: std.mem.Allocator, h: Hashicorp) ![]u8 {
         const url = try std.fmt.allocPrint(
             allocator,
-            "https://checkpoint-api.hashicorp.com/v1/check/{s}",
+            hashicorp_checkpoint_url,
             .{h.product},
         );
         defer allocator.free(url);
@@ -136,7 +161,7 @@ pub const VersionSource = union(enum) {
     }
 
     fn resolveK8sStableTxt(allocator: std.mem.Allocator) ![]u8 {
-        const body = http.get(allocator, "https://dl.k8s.io/release/stable.txt") catch
+        const body = http.get(allocator, k8s_stable_txt_url) catch
             return error.VersionFetchFailed;
         defer allocator.free(body);
 
@@ -148,7 +173,7 @@ pub const VersionSource = union(enum) {
     fn resolvePypi(allocator: std.mem.Allocator, p: Pypi) ![]u8 {
         const url = try std.fmt.allocPrint(
             allocator,
-            "https://pypi.org/pypi/{s}/json",
+            pypi_json_url,
             .{p.package},
         );
         defer allocator.free(url);
@@ -173,7 +198,7 @@ pub const VersionSource = union(enum) {
     }
 
     fn resolveGcloudSdk(allocator: std.mem.Allocator) ![]u8 {
-        const body = http.get(allocator, "https://dl.google.com/dl/cloudsdk/channels/rapid/components-2.json") catch
+        const body = http.get(allocator, gcloud_components_url) catch
             return error.VersionFetchFailed;
         defer allocator.free(body);
 
@@ -186,7 +211,7 @@ pub const VersionSource = union(enum) {
     }
 
     fn resolveGithubTags(allocator: std.mem.Allocator, gh: GithubRelease) ![]u8 {
-        const url = try std.fmt.allocPrint(allocator, "https://api.github.com/repos/{s}/tags", .{gh.repo});
+        const url = try std.fmt.allocPrint(allocator, github_api_tags_url, .{gh.repo});
         defer allocator.free(url);
 
         const body = http.get(allocator, url) catch return error.VersionFetchFailed;
@@ -209,7 +234,7 @@ pub const VersionSource = union(enum) {
     }
 
     fn resolveZiglang(allocator: std.mem.Allocator) ![]u8 {
-        const body = http.get(allocator, "https://ziglang.org/download/index.json") catch
+        const body = http.get(allocator, ziglang_index_url) catch
             return error.VersionFetchFailed;
         defer allocator.free(body);
 
@@ -220,14 +245,14 @@ pub const VersionSource = union(enum) {
         if (parsed.value != .object) return error.VersionParseFailed;
         var it = parsed.value.object.iterator();
         while (it.next()) |entry| {
-            if (std.mem.eql(u8, entry.key_ptr.*, "master")) continue;
+            if (std.mem.eql(u8, entry.key_ptr.*, ziglang_master_key)) continue;
             return allocator.dupe(u8, entry.key_ptr.*);
         }
         return error.VersionNotFound;
     }
 
     fn resolveGoDl(allocator: std.mem.Allocator) ![]u8 {
-        const body = http.get(allocator, "https://go.dev/dl/?mode=json") catch
+        const body = http.get(allocator, go_downloads_url) catch
             return error.VersionFetchFailed;
         defer allocator.free(body);
 
@@ -245,8 +270,8 @@ pub const VersionSource = union(enum) {
 
         for (parsed.value) |entry| {
             if (!entry.stable) continue;
-            const ver = if (std.mem.startsWith(u8, entry.version, "go"))
-                entry.version["go".len..]
+            const ver = if (std.mem.startsWith(u8, entry.version, go_version_prefix))
+                entry.version[go_version_prefix.len..]
             else
                 entry.version;
             return allocator.dupe(u8, ver);
@@ -457,7 +482,7 @@ pub const InstallStrategy = union(enum) {
         extra_binaries: []const []const u8 = &.{},
 
         pub fn execute(self: PipVenv, ctx: *InstallContext) !void {
-            const home = @import("env.zig").getenv("HOME") orelse "/tmp";
+            const home = env.getenv("HOME") orelse paths.fallback_home;
             // Expand ~ manually
             const install_dir = if (std.mem.startsWith(u8, self.install_dir_rel, "~/"))
                 try std.fs.path.join(ctx.allocator, &.{ home, self.install_dir_rel[2..] })
@@ -571,19 +596,19 @@ pub const InstallStrategy = union(enum) {
             }
 
             // Determine the working directory: either a persistent SDK dir or the temp extract dir
-            const home = @import("env.zig").getenv("HOME") orelse "/tmp";
+            const home = env.getenv("HOME") orelse paths.fallback_home;
             const effective_dir: []const u8 = if (self.sdk_dir) |sd_tmpl| blk: {
                 // sdk_dir supports template variables (e.g. zig uses version in dir name)
                 const sd = try renderTemplate(ctx.allocator, sd_tmpl, ctx);
                 defer ctx.allocator.free(sd);
                 // sdk_name is the fixed install dir name; falls back to sdk_dir if simple
                 const install_name = self.sdk_name orelse sd;
-                const sdk_path = try std.fs.path.join(ctx.allocator, &.{ home, ".local", "opt", install_name });
+                const sdk_path = try std.fs.path.join(ctx.allocator, &.{ home, paths.local_dir, "opt", install_name });
                 // Remove old installation and move new one into place
                 std.Io.Dir.cwd().deleteTree(io_ctx.get(), sdk_path) catch {};
                 const src = try std.fmt.allocPrint(ctx.allocator, "{s}/{s}", .{ extract_dir, sd });
                 defer ctx.allocator.free(src);
-                const opt_parent = try std.fs.path.join(ctx.allocator, &.{ home, ".local", "opt" });
+                const opt_parent = try std.fs.path.join(ctx.allocator, &.{ home, paths.local_dir, "opt" });
                 defer ctx.allocator.free(opt_parent);
                 std.Io.Dir.cwd().createDirPath(io_ctx.get(), opt_parent) catch {};
                 const mv_res = try std.process.run(ctx.allocator, io_ctx.get(), .{
@@ -611,7 +636,7 @@ pub const InstallStrategy = union(enum) {
                 try argv.append(ctx.allocator, script_path);
 
                 if (self.install_script_args) |args_tmpl| {
-                    const opt_dir = try std.fmt.allocPrint(ctx.allocator, "{s}/.local/opt/{s}", .{ home, ctx.tool_id });
+                    const opt_dir = try std.fs.path.join(ctx.allocator, &.{ home, paths.local_dir, "opt", ctx.tool_id });
                     defer ctx.allocator.free(opt_dir);
 
                     var it = std.mem.splitScalar(u8, args_tmpl, ' ');
@@ -777,7 +802,7 @@ fn installBinary(ctx: *InstallContext, src_path: []const u8) !void {
     const dest = try std.fs.path.join(ctx.allocator, &.{ ctx.bin_dir, ctx.tool_id });
     defer ctx.allocator.free(dest);
 
-    const tmp_dest = try std.fmt.allocPrint(ctx.allocator, "{s}.new", .{dest});
+    const tmp_dest = try std.fmt.allocPrint(ctx.allocator, "{s}" ++ paths.new_file_suffix, .{dest});
     defer ctx.allocator.free(tmp_dest);
 
     try std.Io.Dir.cwd().copyFile(src_path, std.Io.Dir.cwd(), tmp_dest, io, .{});

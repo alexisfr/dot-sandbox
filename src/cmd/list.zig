@@ -5,6 +5,8 @@ const state_mod = @import("../state.zig");
 const output = @import("../ui/output.zig");
 const install_cmd = @import("install.zig");
 const io_ctx = @import("../io_ctx.zig");
+const paths = @import("../paths.zig");
+const env = @import("../env.zig");
 
 const help =
     \\Usage: dot list [options]
@@ -44,7 +46,7 @@ fn getTermWidth() usize {
         _ = std.os.linux.ioctl(1, 0x5413, @intFromPtr(&winsize)); // TIOCGWINSZ
         if (winsize.ws_col > 0) return @as(usize, winsize.ws_col);
     }
-    if (@import("../env.zig").getenv("COLUMNS")) |cols| return std.fmt.parseInt(usize, cols, 10) catch 80;
+    if (env.getenv("COLUMNS")) |cols| return std.fmt.parseInt(usize, cols, 10) catch 80;
     return 80;
 }
 
@@ -112,7 +114,7 @@ pub fn run(
     const term_width = getTermWidth();
     const desc_width = if (term_width > overhead) term_width - overhead else desc_min;
 
-    const home = @import("../env.zig").getenv("HOME") orelse "";
+    const home = env.getenv("HOME") orelse "";
 
     // Collect matching tools, then sort by first group name (alphabetical), then by id.
     var matched: std.ArrayList(*const tool_mod.Tool) = .empty;
@@ -232,7 +234,7 @@ fn truncDesc(desc: []const u8, max_visual: usize, buf: []u8) struct { str: []con
 
 /// Returns true if ~/.local/bin/<id> exists but is not registered in dot's state.
 fn isUnmanagedLocal(home: []const u8, id: []const u8, allocator: std.mem.Allocator) bool {
-    const path = std.fs.path.join(allocator, &.{ home, ".local", "bin", id }) catch return false;
+    const path = std.fs.path.join(allocator, &.{ home, paths.local_dir, paths.bin_dir, id }) catch return false;
     defer allocator.free(path);
     std.Io.Dir.cwd().access(io_ctx.get(), path, .{}) catch return false;
     return true;
