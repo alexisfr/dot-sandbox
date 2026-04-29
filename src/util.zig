@@ -1,4 +1,6 @@
 const std = @import("std");
+const env = @import("env.zig");
+const io_ctx = @import("io_ctx.zig");
 
 const max_edit_len = 64;
 
@@ -26,6 +28,23 @@ pub fn editDistance(a: []const u8, b: []const u8) usize {
         }
     }
     return edit_row[lb];
+}
+
+/// Walk $PATH and return the first directory containing `name` as an accessible file.
+/// Returned slice is allocated by `allocator` — caller owns it.
+pub fn findInPath(allocator: std.mem.Allocator, name: []const u8) ?[]u8 {
+    const path_env = env.getenv("PATH") orelse return null;
+    var it = std.mem.splitScalar(u8, path_env, ':');
+    while (it.next()) |dir| {
+        if (dir.len == 0) continue;
+        const full = std.fs.path.join(allocator, &.{ dir, name }) catch continue;
+        std.Io.Dir.cwd().access(io_ctx.get(), full, .{}) catch {
+            allocator.free(full);
+            continue;
+        };
+        return full;
+    }
+    return null;
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -63,4 +82,19 @@ test "editDistance: completely different" {
 test "editDistance: tool id examples" {
     try std.testing.expectEqual(@as(usize, 1), editDistance("helms", "helm"));
     try std.testing.expectEqual(@as(usize, 1), editDistance("kubctl", "kubectl"));
+}
+
+test "findInPath: finds sh in PATH" {
+    // sh is present on every target system; if PATH is set, we should find it.
+    const allocator = std.testing.allocator;
+    const found = findInPath(allocator, "sh") orelse return error.SkipZigTest;
+    defer allocator.free(found);
+    try std.testing.expect(found.len > 0);
+    try std.testing.expect(std.mem.endsWith(u8, found, "/sh"));
+}
+
+test "findInPath: returns null for nonexistent binary" {
+    const allocator = std.testing.allocator;
+    const found = findInPath(allocator, "this-binary-does-not-exist-dot-toolbox");
+    try std.testing.expectEqual(@as(?[]u8, null), found);
 }
